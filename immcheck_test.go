@@ -1,10 +1,11 @@
 package immcheck_test
 
 import (
-	"immcheck"
 	"strings"
 	"testing"
 	"unsafe"
+
+	"github.com/goodbadreviewer/immcheck"
 )
 
 func TestSimpleCounter(t *testing.T) {
@@ -167,6 +168,113 @@ func TestMutationOfUnsafeStringPropertyOfNestedNonPrimitiveStruct(t *testing.T) 
 	checkMutationDetectionMessage(t, panicMessage)
 }
 
+func TestLinkedList(t *testing.T) {
+	type node struct {
+		value int
+		next  *node
+	}
+	tail := &node{
+		value: 1,
+		next:  nil,
+	}
+	head := &node{
+		value: 2,
+		next:  tail,
+	}
+	head.value = 3
+	panicMessage := expectPanic(t, func() {
+		defer immcheck.EnsureImmutability(&head)()
+		tail.value = 4
+	})
+	checkMutationDetectionMessage(t, panicMessage)
+}
+
+func TestRecursiveLinkedList(t *testing.T) {
+	type node struct {
+		value int
+		next  *node
+	}
+	tail := &node{
+		value: 1,
+		next:  nil,
+	}
+	head := &node{
+		value: 2,
+		next:  tail,
+	}
+	tail.next = head
+	panicMessage := expectPanic(t, func() {
+		defer immcheck.EnsureImmutability(&head)()
+		tail.value = 4
+	})
+	checkMutationDetectionMessage(t, panicMessage)
+}
+
+func TestRecursiveInterfaceBasedLinkedList(t *testing.T) {
+	type node struct {
+		value int
+		next  interface{}
+	}
+	tail := &node{
+		value: 1,
+		next:  nil,
+	}
+	head := &node{
+		value: 2,
+		next:  tail,
+	}
+	tail.next = head
+	panicMessage := expectPanic(t, func() {
+		defer immcheck.EnsureImmutability(&head)()
+		tail.value = 4
+	})
+	checkMutationDetectionMessage(t, panicMessage)
+}
+
+func TestPrimitiveStructBehindInterface(t *testing.T) {
+	type person struct {
+		age    uint16
+		height uint8
+	}
+	realPerson := &person{
+		age:    13,
+		height: 150,
+	}
+	var p interface{} = realPerson
+	panicMessage := expectPanic(t, func() {
+		defer immcheck.EnsureImmutability(&p)()
+		realPerson.age = 0
+	})
+	checkMutationDetectionMessage(t, panicMessage)
+}
+
+func TestPointerToSubslice(t *testing.T) {
+	type person struct {
+		age    uint16
+		height uint8
+	}
+	sliceOfPointers := []interface{}{
+		[]interface{}{"otherSliceOfInterfaces", []byte("test")},
+		[1]interface{}{[]byte{1, 2}},
+		45,
+		6.8,
+		"someString",
+		[]interface{}{},
+		[0]interface{}{},
+		[]interface{}{nil, person{age: 1, height: 12}, &person{age: 4, height: 32}},
+		nil,
+		nil,
+		nil,
+	}
+	sliceOfPointers[8] = &sliceOfPointers[9]
+	sliceOfPointers[9] = &sliceOfPointers[8]
+	panicMessage := expectPanic(t, func() {
+		defer immcheck.EnsureImmutability(&sliceOfPointers)()
+		sliceOfPointers[0].([]interface{})[1].([]byte)[0] = 'T'
+	})
+	checkMutationDetectionMessage(t, panicMessage)
+}
+
 func checkMutationDetectionMessage(t *testing.T, panicMessage string) {
 	t.Helper()
 	prefixIsCorrect := strings.HasPrefix(panicMessage, "mutation of immutable value detected")
@@ -182,7 +290,6 @@ func expectPanic(t *testing.T, f func()) string {
 	func() {
 		defer func() {
 			expectedPanic = recover()
-			return
 		}()
 		f()
 	}()
