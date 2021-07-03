@@ -1,8 +1,5 @@
-module immcheck
+module github.com/goodbadreviewer/immcheck
 
-go 1.15
+go 1.16
 
-require (
-	github.com/davecgh/go-spew v1.1.1
-	github.com/sergi/go-diff v1.2.0
-)
+require github.com/sergi/go-diff v1.2.0
