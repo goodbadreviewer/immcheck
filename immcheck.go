@@ -31,12 +31,12 @@ func EnsureImmutability(v interface{}) func() {
 	// TODO: introduce re-usage of ValueSnapshots
 	originalSnapshot := newValueSnapshot(v)
 	targetValue := reflect.ValueOf(v)
-	originalSnapshot = captureChecksumMap(originalSnapshot, targetValue, nil)
+	originalSnapshot = captureChecksumMap(originalSnapshot, targetValue)
 
 	return func() {
 		newSnapshot := newValueSnapshot(v)
-		newSnapshot = captureChecksumMap(newSnapshot, targetValue, nil)
-		//TODO: make manual checksum comparisons
+		newSnapshot = captureChecksumMap(newSnapshot, targetValue)
+		// TODO: make manual checksum comparisons
 		if !reflect.DeepEqual(newSnapshot.checksums, originalSnapshot.checksums) {
 			diff := diffmatchpatch.New()
 			snapshotDiffs := diff.DiffMain(originalSnapshot.stringSnapshot, newSnapshot.stringSnapshot, false)
@@ -46,9 +46,9 @@ func EnsureImmutability(v interface{}) func() {
 					"immutable snapshot was captured here %v:%v\n"+
 					"mutation was detected here %v:%v\n"+
 					"oldSnapshot.checksum: %+v\nnewSnapshot.checksum: %+v\n"+
-					"Checksum Diff: %v\n\n"+
+					"Checksum Diff       : %v\n\n"+
 					"oldSnapshot: %+v\nnewSnapshot: %+v\n"+
-					"Preaty Diff:\n%v",
+					"Preaty Diff: %v",
 				originalSnapshot.captureOriginFile, originalSnapshot.captureOriginLine,
 				newSnapshot.captureOriginFile, newSnapshot.captureOriginLine,
 				originalSnapshot.checksums, newSnapshot.checksums,
@@ -82,7 +82,7 @@ func newValueSnapshot(v interface{}) ValueSnapshot {
 //nolint:gochecknoglobals // We really need this seed to be global to get the same checksums between different calls
 var seed = maphash.MakeSeed()
 
-func captureChecksumMap(snapshot ValueSnapshot, value reflect.Value, pointerToValue unsafe.Pointer) ValueSnapshot {
+func captureChecksumMap(snapshot ValueSnapshot, value reflect.Value) ValueSnapshot {
 	// TODO: introduce pooling of map hashes
 	// TODO: add tests for nils and zero values
 	// TODO: make strict variant that disallow UnsafePointer and Chan
@@ -92,7 +92,7 @@ func captureChecksumMap(snapshot ValueSnapshot, value reflect.Value, pointerToVa
 	valueKind := value.Kind()
 	switch valueKind {
 	case reflect.Ptr, reflect.Interface:
-		valuePointer := pointerOfValue(valueKind, value)
+		valuePointer := pointerOfValue(value)
 		if value.IsNil() {
 			return capturePointer(snapshot, valuePointer, valueKind)
 		}
@@ -101,17 +101,11 @@ func captureChecksumMap(snapshot ValueSnapshot, value reflect.Value, pointerToVa
 			return snapshot
 		}
 		snapshot = capturePointer(snapshot, valuePointer, valueKind)
-		if valueKind == reflect.Ptr {
-			valuePointer = nil
-		}
-		snapshot = captureChecksumMap(snapshot, value.Elem(), valuePointer)
+		snapshot = captureChecksumMap(snapshot, value.Elem())
 		return snapshot
-	case reflect.Array:
-		valuePointer := pointerToValue
-		if valuePointer == nil {
-			valuePointer = unsafe.Pointer(value.UnsafeAddr())
-		}
-		if value.IsZero() {
+	case reflect.Array, reflect.Slice, reflect.String:
+		valuePointer := pointerOfValue(value)
+		if value.IsZero() || value.Len() == 0 {
 			return capturePointer(snapshot, valuePointer, valueKind)
 		}
 		arrayLen := value.Len()
@@ -124,29 +118,9 @@ func captureChecksumMap(snapshot ValueSnapshot, value reflect.Value, pointerToVa
 		snapshot = captureRawBytesLevelChecksum(snapshot, h, valueBytes, valueKind)
 		snapshot = sliceOrArraySnapshot(snapshot, value)
 		return snapshot
-	case reflect.Slice, reflect.String:
-		valuePointer := pointerToValue
-		if valuePointer == nil {
-			valuePointer = unsafe.Pointer(value.UnsafeAddr())
-		}
-		if value.IsZero() || value.Len() == 0 {
-			return capturePointer(snapshot, valuePointer, valueKind)
-		}
-		// TODO: capture slice len and cap, since they can change
-		valueSizeInBytes := value.Index(0).Type().Size()
-		//nolint:govet // unsafeptr: possible misuse of reflect.SliceHeader - Yes we know about it :)
-		targetSliceHeader := *(*reflect.SliceHeader)(valuePointer)
-		targetSliceHeader.Len *= int(valueSizeInBytes)
-		targetSliceHeader.Cap = targetSliceHeader.Len
-		snapshot = captureRawBytesLevelChecksum(snapshot, h, targetSliceHeader, valueKind)
-		snapshot = sliceOrArraySnapshot(snapshot, value)
-		return snapshot
 	case reflect.Struct:
 		valueSizeInBytes := int(value.Type().Size())
-		valuePointer := pointerToValue
-		if valuePointer == nil {
-			valuePointer = unsafe.Pointer(value.UnsafeAddr())
-		}
+		valuePointer := pointerOfValue(value)
 		valueBytes := reflect.SliceHeader{
 			Data: uintptr(valuePointer),
 			Len:  valueSizeInBytes,
@@ -159,18 +133,29 @@ func captureChecksumMap(snapshot ValueSnapshot, value reflect.Value, pointerToVa
 		numField := value.NumField()
 		for i := 0; i < numField; i++ {
 			if !valueIsPrimitive(value.Field(i)) {
-				snapshot = captureChecksumMap(snapshot, value.Field(i), nil)
+				snapshot = captureChecksumMap(snapshot, value.Field(i))
 			}
+		}
+		return snapshot
+	case reflect.Map:
+		valuePointer := pointerOfValue(value)
+		if value.IsNil() || value.IsZero() {
+			return capturePointer(snapshot, valuePointer, valueKind)
+		}
+		snapshot.checksums[checksumKey{p: uintptr(valuePointer), kind: valueKind}] = uint64(value.Len())
+		mapRange := value.MapRange()
+		for mapRange.Next() {
+			k := mapRange.Key()
+			v := mapRange.Value()
+			snapshot = captureChecksumMap(snapshot, k)
+			snapshot = captureChecksumMap(snapshot, v)
 		}
 		return snapshot
 	case reflect.Bool, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
 		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
 		reflect.Float32, reflect.Float64, reflect.Complex64, reflect.Complex128:
 		valueSizeInBytes := int(value.Type().Size())
-		valuePointer := pointerToValue
-		if valuePointer == nil {
-			valuePointer = unsafe.Pointer(value.UnsafeAddr())
-		}
+		valuePointer := pointerOfValue(value)
 		valueBytes := reflect.SliceHeader{
 			Data: uintptr(valuePointer),
 			Len:  valueSizeInBytes,
@@ -178,7 +163,7 @@ func captureChecksumMap(snapshot ValueSnapshot, value reflect.Value, pointerToVa
 		}
 		snapshot = captureRawBytesLevelChecksum(snapshot, h, valueBytes, valueKind)
 		return snapshot
-	case reflect.Chan, reflect.Func, reflect.Map, reflect.UnsafePointer, reflect.Invalid:
+	case reflect.Chan, reflect.Func, reflect.UnsafePointer, reflect.Invalid:
 		panic("unsupported type kind: " + valueKind.String())
 	}
 	return snapshot
@@ -200,7 +185,7 @@ func sliceOrArraySnapshot(snapshot ValueSnapshot, value reflect.Value) ValueSnap
 		return snapshot
 	}
 	for i := 0; i < iterableLen; i++ {
-		snapshot = captureChecksumMap(snapshot, value.Index(i), nil)
+		snapshot = captureChecksumMap(snapshot, value.Index(i))
 	}
 	return snapshot
 }
@@ -238,18 +223,45 @@ func captureRawBytesLevelChecksum(
 ) ValueSnapshot {
 	//nolint:govet // unsafeptr: possible misuse of reflect.SliceHeader - Yes we know about it :)
 	targetSliceAsByteSlice := *(*[]byte)(unsafe.Pointer(&valueBytes))
+	hash.Reset()
 	_, _ = hash.Write(targetSliceAsByteSlice)
-	snapshot.checksums[checksumKey{p: valueBytes.Data, kind: valueKind}] = hash.Sum64()
+	snapshot.checksums[checksumKey{p: uintptr(hash.Sum64()), kind: valueKind}] = hash.Sum64()
 	return snapshot
 }
 
-//go:nocheckptr
-func pointerOfValue(valueKind reflect.Kind, value reflect.Value) unsafe.Pointer {
-	var valuePointer unsafe.Pointer
-	if valueKind == reflect.Ptr {
-		valuePointer = unsafe.Pointer(value.Pointer())
-	} else if valueKind == reflect.Interface {
-		valuePointer = unsafe.Pointer(value.InterfaceData()[1]) // get pointer from interface tuple
+func pointerOfValue(value reflect.Value) unsafe.Pointer {
+	//nolint:exhaustive
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Map, reflect.Ptr, reflect.Slice, reflect.UnsafePointer:
+		return unsafe.Pointer(value.Pointer())
+	case reflect.String:
+		return fetchDataPointerFromString(value)
+	case reflect.Interface:
+		return fetchDataPointerFromInterfaceData(value)
 	}
-	return valuePointer
+	if value.CanInterface() {
+		return fetchPointerFromValueInterface(value)
+	}
+	if value.CanAddr() {
+		return unsafe.Pointer(value.Addr().Pointer())
+	}
+	panic(fmt.Sprintf("can't get pointer to value. kind: %#v; value: %#v", value.Kind().String(), value))
+}
+
+//go:nocheckptr
+func fetchDataPointerFromInterfaceData(value reflect.Value) unsafe.Pointer {
+	return unsafe.Pointer(value.InterfaceData()[1])
+}
+
+//go:nocheckptr
+func fetchDataPointerFromString(value reflect.Value) unsafe.Pointer {
+	stringValue := value.String()
+	//nolint
+	return unsafe.Pointer((*(*reflect.StringHeader)(unsafe.Pointer(&stringValue))).Data)
+}
+
+//go:nocheckptr
+func fetchPointerFromValueInterface(value reflect.Value) unsafe.Pointer {
+	vI := value.Interface()
+	return unsafe.Pointer((*[2]uintptr)(unsafe.Pointer(&vI))[1])
 }

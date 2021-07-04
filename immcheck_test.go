@@ -11,6 +11,7 @@ import (
 func TestSimpleCounter(t *testing.T) {
 	uintCounter := uint64(35)
 	uintCounter++
+	immcheck.EnsureImmutability(&uintCounter)() // check that no mutation is fine
 	panicMessage := expectPanic(t, func() {
 		defer immcheck.EnsureImmutability(&uintCounter)()
 		uintCounter = 74574
@@ -21,6 +22,7 @@ func TestSimpleCounter(t *testing.T) {
 func TestSliceOfIntegers(t *testing.T) {
 	ints := make([]int, 1)
 	ints[0] = 1
+	immcheck.EnsureImmutability(&ints)() // check that no mutation is fine
 	panicMessage := expectPanic(t, func() {
 		defer immcheck.EnsureImmutability(&ints)()
 		ints[0] = 2
@@ -31,6 +33,7 @@ func TestSliceOfIntegers(t *testing.T) {
 func TestSliceOfFloats(t *testing.T) {
 	floats := make([]float64, 10)
 	floats[0] = 3.0
+	immcheck.EnsureImmutability(&floats)() // check that no mutation is fine
 	panicMessage := expectPanic(t, func() {
 		defer immcheck.EnsureImmutability(&floats)()
 		floats[0] = 2
@@ -47,6 +50,8 @@ func TestPrimitiveStruct(t *testing.T) {
 		age:    13,
 		height: 150,
 	}
+	immcheck.EnsureImmutability(&p)() // check that no mutation is fine
+	p.age = 31
 	panicMessage := expectPanic(t, func() {
 		defer immcheck.EnsureImmutability(&p)()
 		p.age = 0
@@ -62,6 +67,7 @@ func TestSliceOfPrimitiveStructs(t *testing.T) {
 	structs := make([]person, 2)
 	structs[0].age = 3
 	structs[1].age = 13
+	immcheck.EnsureImmutability(&structs)() // check that no mutation is fine
 	panicMessage := expectPanic(t, func() {
 		defer immcheck.EnsureImmutability(&structs)()
 		structs[0].age = 0
@@ -78,6 +84,7 @@ func TestSliceOfNonPrimitiveStructs(t *testing.T) {
 	structs := make([]person, 1)
 	structs[0].age = 3
 	structs[0].name = "First"
+	immcheck.EnsureImmutability(&structs)() // check that no mutation is fine
 	panicMessage := expectPanic(t, func() {
 		defer immcheck.EnsureImmutability(&structs)()
 		structs[0].name = "Second"
@@ -118,6 +125,7 @@ func TestMutationOfStringPropertyOfNestedNonPrimitiveStruct(t *testing.T) {
 		parent: &parent,
 	}
 
+	immcheck.EnsureImmutability(&structs)() // check that no mutation is fine
 	panicMessage := expectPanic(t, func() {
 		defer immcheck.EnsureImmutability(&structs)()
 		grandParent.name = "ChangedName"
@@ -160,7 +168,7 @@ func TestMutationOfUnsafeStringPropertyOfNestedNonPrimitiveStruct(t *testing.T) 
 			parent: &parent,
 		},
 	}
-
+	immcheck.EnsureImmutability(&array)() // check that no mutation is fine
 	panicMessage := expectPanic(t, func() {
 		defer immcheck.EnsureImmutability(&array)()
 		grandParentNameBytes[0] = byte('g')
@@ -182,6 +190,7 @@ func TestLinkedList(t *testing.T) {
 		next:  tail,
 	}
 	head.value = 3
+	immcheck.EnsureImmutability(&head)() // check that no mutation is fine
 	panicMessage := expectPanic(t, func() {
 		defer immcheck.EnsureImmutability(&head)()
 		tail.value = 4
@@ -203,6 +212,7 @@ func TestRecursiveLinkedList(t *testing.T) {
 		next:  tail,
 	}
 	tail.next = head
+	immcheck.EnsureImmutability(&head)() // check that no mutation is fine
 	panicMessage := expectPanic(t, func() {
 		defer immcheck.EnsureImmutability(&head)()
 		tail.value = 4
@@ -224,6 +234,7 @@ func TestRecursiveInterfaceBasedLinkedList(t *testing.T) {
 		next:  tail,
 	}
 	tail.next = head
+	immcheck.EnsureImmutability(&head)() // check that no mutation is fine
 	panicMessage := expectPanic(t, func() {
 		defer immcheck.EnsureImmutability(&head)()
 		tail.value = 4
@@ -241,6 +252,7 @@ func TestPrimitiveStructBehindInterface(t *testing.T) {
 		height: 150,
 	}
 	var p interface{} = realPerson
+	immcheck.EnsureImmutability(&realPerson)() // check that no mutation is fine
 	panicMessage := expectPanic(t, func() {
 		defer immcheck.EnsureImmutability(&p)()
 		realPerson.age = 0
@@ -268,9 +280,38 @@ func TestPointerToSubslice(t *testing.T) {
 	}
 	sliceOfPointers[8] = &sliceOfPointers[9]
 	sliceOfPointers[9] = &sliceOfPointers[8]
+
+	immcheck.EnsureImmutability(&sliceOfPointers)() // check that no mutation is fine
 	panicMessage := expectPanic(t, func() {
 		defer immcheck.EnsureImmutability(&sliceOfPointers)()
 		sliceOfPointers[0].([]interface{})[1].([]byte)[0] = 'T'
+	})
+	checkMutationDetectionMessage(t, panicMessage)
+}
+
+func TestMap(t *testing.T) {
+	type person struct {
+		age    uint16
+		height uint8
+		memory map[string]string
+	}
+	data := map[string]interface{}{
+		"b": 10,
+		"a": "a",
+		"c": 5.6,
+		"d": []*person{{age: 1, height: 2}},
+		"e": map[int][]byte{1: []byte("hello")},
+	}
+	data["d"] = append(data["d"].([]*person), &person{
+		age:    3,
+		height: 4,
+		memory: map[string]string{"f": "k"},
+	})
+	immcheck.EnsureImmutability(&data)() // check that no mutation is fine
+	panicMessage := expectPanic(t, func() {
+		defer immcheck.EnsureImmutability(&data)()
+		e := data["e"].(map[int][]byte)
+		e[1][0] = 'H'
 	})
 	checkMutationDetectionMessage(t, panicMessage)
 }
