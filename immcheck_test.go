@@ -1,6 +1,7 @@
 package immcheck_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"unsafe"
@@ -242,6 +243,93 @@ func TestRecursiveInterfaceBasedLinkedList(t *testing.T) {
 	checkMutationDetectionMessage(t, panicMessage)
 }
 
+func TestUnsafePointer(t *testing.T) {
+	type person struct {
+		age uint16
+		ptr unsafe.Pointer
+	}
+	realPerson := &person{
+		age: 13,
+		ptr: unsafe.Pointer(nil),
+	}
+	p := unsafe.Pointer(realPerson)
+	immcheck.EnsureImmutability(&p)() // check that no mutation is fine
+
+	immutabilityCheck := immcheck.EnsureImmutability(&p)
+	realPerson.age = 31
+	immutabilityCheck() // mutation behind unsafe pointer won't be detected
+
+	{
+		panicMessage := expectPanic(t, func() {
+			defer immcheck.EnsureImmutability(&p)()
+			p = unsafe.Pointer(&person{})
+		})
+		checkMutationDetectionMessage(t, panicMessage)
+	}
+	{
+		panicMessage := expectPanic(t, func() {
+			defer immcheck.EnsureImmutability(&realPerson)()
+			realPerson.ptr = unsafe.Pointer(&person{})
+		})
+		checkMutationDetectionMessage(t, panicMessage)
+	}
+}
+
+func TestFunction(t *testing.T) {
+	type person struct {
+		age uint16
+		f   func()
+	}
+	i := 1
+	realPerson := &person{
+		age: 13,
+		f: func() {
+			fmt.Printf("hello: %v\n", &i)
+		},
+	}
+	immcheck.EnsureImmutability(&realPerson)() // check that no mutation is fine
+
+	immutabilityCheck := immcheck.EnsureImmutability(&realPerson)
+	i = 2
+	immutabilityCheck() // mutation of captuted scope won't be detected
+
+	panicMessage := expectPanic(t, func() {
+		defer immcheck.EnsureImmutability(&realPerson)()
+		realPerson.f = func() {}
+	})
+	checkMutationDetectionMessage(t, panicMessage)
+}
+
+func TestChannel(t *testing.T) {
+	type person struct {
+		age uint16
+		ch  chan int
+	}
+	realPerson := &person{
+		age: 13,
+		ch:  make(chan int, 10),
+	}
+	immcheck.EnsureImmutability(&realPerson)() // check that no mutation is fine
+
+	{
+		immutabilityCheck := immcheck.EnsureImmutability(&realPerson)
+		realPerson.ch <- 1
+		immutabilityCheck() // channel sends won't be detected
+	}
+
+	{
+		immutabilityCheck := immcheck.EnsureImmutability(&realPerson)
+		close(realPerson.ch)
+		immutabilityCheck() // channel close won't be detected
+	}
+
+	panicMessage := expectPanic(t, func() {
+		defer immcheck.EnsureImmutability(&realPerson)()
+		realPerson.ch = make(chan int)
+	})
+	checkMutationDetectionMessage(t, panicMessage)
+}
+
 func TestPrimitiveStructBehindInterface(t *testing.T) {
 	type person struct {
 		age    uint16
@@ -252,7 +340,7 @@ func TestPrimitiveStructBehindInterface(t *testing.T) {
 		height: 150,
 	}
 	var p interface{} = realPerson
-	immcheck.EnsureImmutability(&realPerson)() // check that no mutation is fine
+	immcheck.EnsureImmutability(&p)() // check that no mutation is fine
 	panicMessage := expectPanic(t, func() {
 		defer immcheck.EnsureImmutability(&p)()
 		realPerson.age = 0
@@ -301,6 +389,8 @@ func TestMap(t *testing.T) {
 		"c": 5.6,
 		"d": []*person{{age: 1, height: 2}},
 		"e": map[int][]byte{1: []byte("hello")},
+		"p": unsafe.Pointer(&person{}),
+		"f": func() {},
 	}
 	data["d"] = append(data["d"].([]*person), &person{
 		age:    3,
