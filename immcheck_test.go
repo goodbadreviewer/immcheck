@@ -1,6 +1,8 @@
 package immcheck_test
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"unsafe"
@@ -11,17 +13,61 @@ import (
 func TestSimpleCounter(t *testing.T) {
 	uintCounter := uint64(35)
 	uintCounter++
-	panicMessage := expectPanic(t, func() {
+	immcheck.EnsureImmutability(&uintCounter)() // check that no mutation is fine
+	panicMessage := expectMutationPanic(t, func() {
 		defer immcheck.EnsureImmutability(&uintCounter)()
 		uintCounter = 74574
 	})
 	checkMutationDetectionMessage(t, panicMessage)
 }
 
+func TestSimpleCounterWithOptions(t *testing.T) {
+	uintCounter := uint64(35)
+	uintCounter++
+	immcheck.EnsureImmutabilityWithOptions(&uintCounter, immcheck.ImutabilityCheckOptions{
+		SkipOriginCapturing:         true,
+		SkipStringSnapshotCapturing: true,
+	})() // check that no mutation is fine
+	panicMessage := expectMutationPanic(t, func() {
+		defer immcheck.EnsureImmutabilityWithOptions(&uintCounter, immcheck.ImutabilityCheckOptions{
+			SkipOriginCapturing:         true,
+			SkipStringSnapshotCapturing: true,
+		})()
+		uintCounter = 74574
+	})
+	checkMutationDetectionMessage(t, panicMessage)
+}
+
+func TestUnsafeWithNotAllowedUnsafeOption(t *testing.T) {
+	function := func() {}
+	channel := make(chan int)
+	counter := uint(0)
+	unsafePointer := unsafe.Pointer(&counter)
+	{
+		panicMessage := expectPanic(t, func() {
+			immcheck.EnsureImmutability(&function)
+		}, immcheck.UnsupportedTypeError)
+		checkUnsupportedTypeMessage(t, panicMessage, "func")
+	}
+	{
+		panicMessage := expectPanic(t, func() {
+			immcheck.EnsureImmutability(&channel)
+		}, immcheck.UnsupportedTypeError)
+		checkUnsupportedTypeMessage(t, panicMessage, "chan")
+	}
+	{
+		panicMessage := expectPanic(t, func() {
+			immcheck.EnsureImmutability(&unsafePointer)
+		}, immcheck.UnsupportedTypeError)
+		checkUnsupportedTypeMessage(t, panicMessage, "unsafe.Pointer")
+	}
+}
+
 func TestSliceOfIntegers(t *testing.T) {
 	ints := make([]int, 1)
 	ints[0] = 1
-	panicMessage := expectPanic(t, func() {
+	immcheck.EnsureImmutability(&ints)() // check that no mutation is fine
+	panicMessage := expectMutationPanic(t, func() {
 		defer immcheck.EnsureImmutability(&ints)()
 		ints[0] = 2
 	})
@@ -31,7 +77,8 @@ func TestSliceOfIntegers(t *testing.T) {
 func TestSliceOfFloats(t *testing.T) {
 	floats := make([]float64, 10)
 	floats[0] = 3.0
-	panicMessage := expectPanic(t, func() {
+	immcheck.EnsureImmutability(&floats)() // check that no mutation is fine
+	panicMessage := expectMutationPanic(t, func() {
 		defer immcheck.EnsureImmutability(&floats)()
 		floats[0] = 2
 	})
@@ -47,7 +94,9 @@ func TestPrimitiveStruct(t *testing.T) {
 		age:    13,
 		height: 150,
 	}
-	panicMessage := expectPanic(t, func() {
+	immcheck.EnsureImmutability(&p)() // check that no mutation is fine
+	p.age = 31
+	panicMessage := expectMutationPanic(t, func() {
 		defer immcheck.EnsureImmutability(&p)()
 		p.age = 0
 	})
@@ -62,7 +111,8 @@ func TestSliceOfPrimitiveStructs(t *testing.T) {
 	structs := make([]person, 2)
 	structs[0].age = 3
 	structs[1].age = 13
-	panicMessage := expectPanic(t, func() {
+	immcheck.EnsureImmutability(&structs)() // check that no mutation is fine
+	panicMessage := expectMutationPanic(t, func() {
 		defer immcheck.EnsureImmutability(&structs)()
 		structs[0].age = 0
 	})
@@ -78,7 +128,8 @@ func TestSliceOfNonPrimitiveStructs(t *testing.T) {
 	structs := make([]person, 1)
 	structs[0].age = 3
 	structs[0].name = "First"
-	panicMessage := expectPanic(t, func() {
+	immcheck.EnsureImmutability(&structs)() // check that no mutation is fine
+	panicMessage := expectMutationPanic(t, func() {
 		defer immcheck.EnsureImmutability(&structs)()
 		structs[0].name = "Second"
 	})
@@ -118,7 +169,8 @@ func TestMutationOfStringPropertyOfNestedNonPrimitiveStruct(t *testing.T) {
 		parent: &parent,
 	}
 
-	panicMessage := expectPanic(t, func() {
+	immcheck.EnsureImmutability(&structs)() // check that no mutation is fine
+	panicMessage := expectMutationPanic(t, func() {
 		defer immcheck.EnsureImmutability(&structs)()
 		grandParent.name = "ChangedName"
 	})
@@ -160,8 +212,8 @@ func TestMutationOfUnsafeStringPropertyOfNestedNonPrimitiveStruct(t *testing.T) 
 			parent: &parent,
 		},
 	}
-
-	panicMessage := expectPanic(t, func() {
+	immcheck.EnsureImmutability(&array)() // check that no mutation is fine
+	panicMessage := expectMutationPanic(t, func() {
 		defer immcheck.EnsureImmutability(&array)()
 		grandParentNameBytes[0] = byte('g')
 	})
@@ -182,7 +234,8 @@ func TestLinkedList(t *testing.T) {
 		next:  tail,
 	}
 	head.value = 3
-	panicMessage := expectPanic(t, func() {
+	immcheck.EnsureImmutability(&head)() // check that no mutation is fine
+	panicMessage := expectMutationPanic(t, func() {
 		defer immcheck.EnsureImmutability(&head)()
 		tail.value = 4
 	})
@@ -203,7 +256,8 @@ func TestRecursiveLinkedList(t *testing.T) {
 		next:  tail,
 	}
 	tail.next = head
-	panicMessage := expectPanic(t, func() {
+	immcheck.EnsureImmutability(&head)() // check that no mutation is fine
+	panicMessage := expectMutationPanic(t, func() {
 		defer immcheck.EnsureImmutability(&head)()
 		tail.value = 4
 	})
@@ -224,9 +278,100 @@ func TestRecursiveInterfaceBasedLinkedList(t *testing.T) {
 		next:  tail,
 	}
 	tail.next = head
-	panicMessage := expectPanic(t, func() {
+	immcheck.EnsureImmutability(&head)() // check that no mutation is fine
+	panicMessage := expectMutationPanic(t, func() {
 		defer immcheck.EnsureImmutability(&head)()
 		tail.value = 4
+	})
+	checkMutationDetectionMessage(t, panicMessage)
+}
+
+func TestUnsafePointer(t *testing.T) {
+	allowUnsafe := immcheck.ImutabilityCheckOptions{AllowInherintlyUnsafeTypes: true}
+	type person struct {
+		age uint16
+		ptr unsafe.Pointer
+	}
+	realPerson := &person{
+		age: 13,
+		ptr: unsafe.Pointer(nil),
+	}
+	p := unsafe.Pointer(realPerson)
+	immcheck.EnsureImmutabilityWithOptions(&p, allowUnsafe)() // check that no mutation is fine
+
+	immutabilityCheck := immcheck.EnsureImmutabilityWithOptions(&p, allowUnsafe)
+	realPerson.age = 31
+	immutabilityCheck() // mutation behind unsafe pointer won't be detected
+
+	{
+		panicMessage := expectMutationPanic(t, func() {
+			defer immcheck.EnsureImmutabilityWithOptions(&p, allowUnsafe)()
+			p = unsafe.Pointer(&person{})
+		})
+		checkMutationDetectionMessage(t, panicMessage)
+	}
+	{
+		panicMessage := expectMutationPanic(t, func() {
+			defer immcheck.EnsureImmutabilityWithOptions(&realPerson, allowUnsafe)()
+			realPerson.ptr = unsafe.Pointer(&person{})
+		})
+		checkMutationDetectionMessage(t, panicMessage)
+	}
+}
+
+func TestFunction(t *testing.T) {
+	allowUnsafe := immcheck.ImutabilityCheckOptions{AllowInherintlyUnsafeTypes: true}
+	type person struct {
+		age uint16
+		f   func()
+	}
+	i := 1
+	realPerson := &person{
+		age: 13,
+		f: func() {
+			fmt.Printf("hello: %v\n", &i)
+		},
+	}
+	immcheck.EnsureImmutabilityWithOptions(&realPerson, allowUnsafe)() // check that no mutation is fine
+
+	immutabilityCheck := immcheck.EnsureImmutabilityWithOptions(&realPerson, allowUnsafe)
+	i = 2
+	immutabilityCheck() // mutation of captuted scope won't be detected
+
+	panicMessage := expectMutationPanic(t, func() {
+		defer immcheck.EnsureImmutabilityWithOptions(&realPerson, allowUnsafe)()
+		realPerson.f = func() {}
+	})
+	checkMutationDetectionMessage(t, panicMessage)
+}
+
+func TestChannel(t *testing.T) {
+	allowUnsafe := immcheck.ImutabilityCheckOptions{AllowInherintlyUnsafeTypes: true}
+	type person struct {
+		age uint16
+		ch  chan int
+	}
+	realPerson := &person{
+		age: 13,
+		ch:  make(chan int, 10),
+	}
+	immcheck.EnsureImmutabilityWithOptions(&realPerson, allowUnsafe)() // check that no mutation is fine
+
+	{
+		immutabilityCheck := immcheck.EnsureImmutabilityWithOptions(&realPerson, allowUnsafe)
+		realPerson.ch <- 1
+		immutabilityCheck() // channel sends won't be detected
+	}
+
+	{
+		immutabilityCheck := immcheck.EnsureImmutabilityWithOptions(&realPerson, allowUnsafe)
+		close(realPerson.ch)
+		immutabilityCheck() // channel close won't be detected
+	}
+
+	panicMessage := expectMutationPanic(t, func() {
+		defer immcheck.EnsureImmutabilityWithOptions(&realPerson, allowUnsafe)()
+		realPerson.ch = make(chan int)
 	})
 	checkMutationDetectionMessage(t, panicMessage)
 }
@@ -241,7 +386,8 @@ func TestPrimitiveStructBehindInterface(t *testing.T) {
 		height: 150,
 	}
 	var p interface{} = realPerson
-	panicMessage := expectPanic(t, func() {
+	immcheck.EnsureImmutability(&p)() // check that no mutation is fine
+	panicMessage := expectMutationPanic(t, func() {
 		defer immcheck.EnsureImmutability(&p)()
 		realPerson.age = 0
 	})
@@ -268,9 +414,41 @@ func TestPointerToSubslice(t *testing.T) {
 	}
 	sliceOfPointers[8] = &sliceOfPointers[9]
 	sliceOfPointers[9] = &sliceOfPointers[8]
-	panicMessage := expectPanic(t, func() {
+
+	immcheck.EnsureImmutability(&sliceOfPointers)() // check that no mutation is fine
+	panicMessage := expectMutationPanic(t, func() {
 		defer immcheck.EnsureImmutability(&sliceOfPointers)()
 		sliceOfPointers[0].([]interface{})[1].([]byte)[0] = 'T'
+	})
+	checkMutationDetectionMessage(t, panicMessage)
+}
+
+func TestMap(t *testing.T) {
+	allowUnsafe := immcheck.ImutabilityCheckOptions{AllowInherintlyUnsafeTypes: true}
+	type person struct {
+		age    uint16
+		height uint8
+		memory map[string]string
+	}
+	data := map[string]interface{}{
+		"b": 10,
+		"a": "a",
+		"c": 5.6,
+		"d": []*person{{age: 1, height: 2}},
+		"e": map[int][]byte{1: []byte("hello")},
+		"p": unsafe.Pointer(&person{}),
+		"f": func() {},
+	}
+	data["d"] = append(data["d"].([]*person), &person{
+		age:    3,
+		height: 4,
+		memory: map[string]string{"f": "k"},
+	})
+	immcheck.EnsureImmutabilityWithOptions(&data, allowUnsafe)() // check that no mutation is fine
+	panicMessage := expectMutationPanic(t, func() {
+		defer immcheck.EnsureImmutabilityWithOptions(&data, allowUnsafe)()
+		e := data["e"].(map[int][]byte)
+		e[1][0] = 'H'
 	})
 	checkMutationDetectionMessage(t, panicMessage)
 }
@@ -284,17 +462,47 @@ func checkMutationDetectionMessage(t *testing.T, panicMessage string) {
 	}
 }
 
-func expectPanic(t *testing.T, f func()) string {
+func checkUnsupportedTypeMessage(t *testing.T, panicMessage string, expectedTypeStringInErrorMessage string) {
 	t.Helper()
-	var expectedPanic interface{}
+	prefixIsCorrect := strings.HasPrefix(
+		panicMessage,
+		"unsupported type for immutability check. "+
+			"UnsafePointer, Func, and Chan types are not supported, "+
+			"since there is no way for us to fully verify immutability for these types. "+
+			"If you still want to proceed and ignore fields of such type "+
+			"use ImutabilityCheckOptions.AllowInherintlyUnsafeTypes option. Unsupported type kind: ",
+	)
+	sufixIsCorrect := strings.HasSuffix(panicMessage, expectedTypeStringInErrorMessage)
+	t.Log(panicMessage)
+	if !prefixIsCorrect || !sufixIsCorrect {
+		t.Fatal("unexpected panic message: " + panicMessage)
+	}
+}
+
+func expectMutationPanic(t *testing.T, f func()) string {
+	t.Helper()
+	return expectPanic(t, f, immcheck.MutationDetectedError)
+}
+
+func expectPanic(t *testing.T, f func(), expectedError error) string {
+	t.Helper()
+	var actualPanic interface{}
 	func() {
 		defer func() {
-			expectedPanic = recover()
+			actualPanic = recover()
+			if expectedError != nil {
+				if !errors.Is(actualPanic.(error), expectedError) {
+					t.Fatalf(
+						"unexpected error type. expected %T(%v); actual: %T(%v)",
+						expectedError, expectedError, actualPanic, actualPanic,
+					)
+				}
+			}
 		}()
 		f()
 	}()
-	if expectedPanic == nil {
-		t.Fatal("mutation isn't detected")
+	if actualPanic == nil {
+		t.Fatal("panic isn't detected")
 	}
-	return expectedPanic.(string)
+	return actualPanic.(error).Error()
 }
