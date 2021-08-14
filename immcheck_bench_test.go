@@ -188,7 +188,7 @@ type Transaction struct {
 	Amount      Money
 	StateBefore *StateSnapshot
 	StateAfter  *StateSnapshot
-	TxContext   map[string]string
+	TxContext   []string
 	Attachments map[string]interface{}
 }
 
@@ -249,13 +249,11 @@ func GenerateTransaction(rnd *rand.Rand, contextSize int) *Transaction {
 		},
 	}
 
-	txContext := make(map[string]string, contextSize)
+	txContext := make([]string, contextSize)
 	for i := 0; i < contextSize; i++ {
-		key := make([]byte, rand.Intn(128))
 		value := make([]byte, rand.Intn(4096))
-		rnd.Read(key)
 		rnd.Read(value)
-		txContext[string(key)] = string(value)
+		txContext[i] = string(value)
 	}
 
 	return &Transaction{

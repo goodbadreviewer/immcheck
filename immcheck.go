@@ -65,8 +65,7 @@ func NewValueSnapshotWithOptions(v interface{}, options ImutabilityCheckOptions)
 func (v *ValueSnapshot) CheckImmutabilityAgainst(otherSnapshot *ValueSnapshot) error {
 	originalSnapshot := v
 	newSnapshot := otherSnapshot
-	// TODO: make manual checksum comparisons
-	if reflect.DeepEqual(newSnapshot.checksums, originalSnapshot.checksums) {
+	if equals(newSnapshot, originalSnapshot) {
 		return nil
 	}
 
@@ -118,6 +117,22 @@ func (v *ValueSnapshot) CheckImmutabilityAgainst(otherSnapshot *ValueSnapshot) e
 		diff.DiffPrettyText(checksumDiffs),
 		stringSnapshotsAndComparison,
 	)
+}
+
+func equals(newSnapshot *ValueSnapshot, originalSnapshot *ValueSnapshot) bool {
+	if len(newSnapshot.checksums) != len(originalSnapshot.checksums) {
+		return false
+	}
+	for newSnapshotKey, newSnapshotValue := range newSnapshot.checksums {
+		originalSnapshotValue, ok := originalSnapshot.checksums[newSnapshotKey]
+		if !ok {
+			return false
+		}
+		if newSnapshotValue != originalSnapshotValue {
+			return false
+		}
+	}
+	return true
 }
 
 func EnsureImmutability(v interface{}) func() {
