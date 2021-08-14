@@ -21,6 +21,36 @@ func TestSimpleCounter(t *testing.T) {
 	checkMutationDetectionMessage(t, panicMessage)
 }
 
+func TestSimpleCounterManualCheck(t *testing.T) {
+	uintCounter := uint64(35)
+	uintCounter++
+
+	{
+		// check that no mutation is fine
+		snapshot := immcheck.NewValueSnapshot(&uintCounter)
+		otherSnapshot := immcheck.NewValueSnapshot(&uintCounter)
+		err := snapshot.CheckImmutabilityAgainst(otherSnapshot)
+		if err != nil {
+			t.Fatalf("enexpected error happened: %v", err)
+		}
+	}
+
+	{
+		// check that no mutation is fine
+		snapshot := immcheck.NewValueSnapshot(&uintCounter)
+		uintCounter = 74574
+		otherSnapshot := immcheck.NewValueSnapshot(&uintCounter)
+		err := snapshot.CheckImmutabilityAgainst(otherSnapshot)
+		if err == nil {
+			t.Fatal("no mutation detected")
+		}
+		if !errors.Is(err, immcheck.MutationDetectedError) {
+			t.Fatalf("enexpected error happened: %v", err)
+		}
+		checkMutationDetectionMessage(t, err.Error())
+	}
+}
+
 func TestSimpleCounterWithOptions(t *testing.T) {
 	uintCounter := uint64(35)
 	uintCounter++
@@ -455,10 +485,15 @@ func TestMap(t *testing.T) {
 
 func checkMutationDetectionMessage(t *testing.T, panicMessage string) {
 	t.Helper()
-	prefixIsCorrect := strings.HasPrefix(panicMessage, "mutation of immutable value detected")
 	t.Log(panicMessage)
+	prefixIsCorrect := strings.HasPrefix(panicMessage, "mutation of immutable value detected")
 	if !prefixIsCorrect {
 		t.Fatal("unexpected panic message: " + panicMessage)
+	}
+	if strings.Contains(panicMessage, "immutable snapshot was captured here") {
+		if strings.Count(panicMessage, "immcheck_test.go:") != 2 {
+			t.Fatal("snapshot origin capturing is broken ")
+		}
 	}
 }
 

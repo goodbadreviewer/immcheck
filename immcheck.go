@@ -49,14 +49,16 @@ func (v *ValueSnapshot) String() string {
 }
 
 func NewValueSnapshot(v interface{}) *ValueSnapshot {
-	snapshot := newValueSnapshot(v, ImutabilityCheckOptions{})
+	skipTwoFrames := 2
+	snapshot := newValueSnapshot(v, ImutabilityCheckOptions{}, skipTwoFrames)
 	targetValue := reflect.ValueOf(v)
 	snapshot = captureChecksumMap(snapshot, targetValue, ImutabilityCheckOptions{})
 	return snapshot
 }
 
 func NewValueSnapshotWithOptions(v interface{}, options ImutabilityCheckOptions) *ValueSnapshot {
-	snapshot := newValueSnapshot(v, options)
+	skipTwoFrames := 2
+	snapshot := newValueSnapshot(v, options, skipTwoFrames)
 	targetValue := reflect.ValueOf(v)
 	snapshot = captureChecksumMap(snapshot, targetValue, options)
 	return snapshot
@@ -149,12 +151,14 @@ func ensureImmutability(v interface{}, options ImutabilityCheckOptions) func() {
 	}
 
 	// TODO: introduce re-usage of ValueSnapshots
-	originalSnapshot := newValueSnapshot(v, options)
+	skipThreeFrames := 3
+	originalSnapshot := newValueSnapshot(v, options, skipThreeFrames)
 	targetValue := reflect.ValueOf(v)
 	originalSnapshot = captureChecksumMap(originalSnapshot, targetValue, options)
 
 	return func() {
-		newSnapshot := newValueSnapshot(v, options)
+		thisFunctionWillBeInvokedByUserDirectlySoSkipOnlyTwoFrames := 2
+		newSnapshot := newValueSnapshot(v, options, thisFunctionWillBeInvokedByUserDirectlySoSkipOnlyTwoFrames)
 		newSnapshot = captureChecksumMap(newSnapshot, targetValue, options)
 		checkErr := originalSnapshot.CheckImmutabilityAgainst(newSnapshot)
 		if checkErr != nil {
@@ -163,13 +167,13 @@ func ensureImmutability(v interface{}, options ImutabilityCheckOptions) func() {
 	}
 }
 
-func newValueSnapshot(v interface{}, options ImutabilityCheckOptions) *ValueSnapshot {
+func newValueSnapshot(v interface{}, options ImutabilityCheckOptions, framesToSkip int) *ValueSnapshot {
 	file := ""
 	line := 0
 	if !options.SkipOriginCapturing {
-		skipTwoCallerFramesAndShowOnlyUsersCode := 2
+		skipCallerFramesAndShowOnlyUsersCode := framesToSkip
 		ok := false
-		_, file, line, ok = runtime.Caller(skipTwoCallerFramesAndShowOnlyUsersCode)
+		_, file, line, ok = runtime.Caller(skipCallerFramesAndShowOnlyUsersCode)
 		if !ok {
 			panic("can't capture stack trace")
 		}
