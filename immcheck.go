@@ -1,10 +1,12 @@
 package immcheck
 
 import (
+	"bytes"
 	"fmt"
 	"hash/maphash"
 	"reflect"
 	"runtime"
+	"strconv"
 	"unsafe"
 
 	"github.com/sergi/go-diff/diffmatchpatch"
@@ -27,12 +29,37 @@ type ValueSnapshot struct {
 	stringSnapshot string
 }
 
+func (v *ValueSnapshot) String() string {
+	var buf bytes.Buffer
+	if v.captureOriginFile != "" && v.captureOriginLine != 0 {
+		buf.WriteString("origin: ")
+		buf.WriteString(v.captureOriginFile)
+		buf.WriteByte(':')
+		buf.WriteString(strconv.Itoa(v.captureOriginLine))
+		buf.WriteString("; ")
+	}
+	if v.stringSnapshot != "" {
+		buf.WriteString("stringSnapshot: ")
+		buf.WriteString(v.stringSnapshot)
+		buf.WriteString("; ")
+	}
+	buf.WriteString("checksum: ")
+	buf.WriteString(fmt.Sprintf("%+v", v.checksums))
+	return buf.String()
+}
+
 func NewValueSnapshot(v interface{}) *ValueSnapshot {
-	return newValueSnapshot(v, ImutabilityCheckOptions{})
+	snapshot := newValueSnapshot(v, ImutabilityCheckOptions{})
+	targetValue := reflect.ValueOf(v)
+	snapshot = captureChecksumMap(snapshot, targetValue, ImutabilityCheckOptions{})
+	return snapshot
 }
 
 func NewValueSnapshotWithOptions(v interface{}, options ImutabilityCheckOptions) *ValueSnapshot {
-	return newValueSnapshot(v, options)
+	snapshot := newValueSnapshot(v, options)
+	targetValue := reflect.ValueOf(v)
+	snapshot = captureChecksumMap(snapshot, targetValue, options)
+	return snapshot
 }
 
 func (v *ValueSnapshot) CheckImmutabilityAgainst(otherSnapshot *ValueSnapshot) error {
@@ -153,8 +180,6 @@ var seed = maphash.MakeSeed()
 
 func captureChecksumMap(snapshot *ValueSnapshot, value reflect.Value, options ImutabilityCheckOptions) *ValueSnapshot {
 	// TODO: introduce pooling of map hashes
-	// TODO: add tests for nils and zero values
-	// TODO: make strict variant that disallow UnsafePointer and Chan
 	h := &maphash.Hash{}
 	h.SetSeed(seed)
 
