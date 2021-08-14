@@ -22,7 +22,10 @@
           "goconst",
           "gomnd",
           "structcheck",
-          "unused"
+          "unused",
+          "gochecknoglobals",
+          "gosec",
+          "gocognit"
         ]
       }
     ]

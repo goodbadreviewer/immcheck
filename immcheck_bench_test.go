@@ -2,9 +2,10 @@ package immcheck_test
 
 import (
 	"fmt"
-	"github.com/goodbadreviewer/immcheck"
 	"math/rand"
 	"testing"
+
+	"github.com/goodbadreviewer/immcheck"
 )
 
 var settings = []immcheck.ImutabilityCheckOptions{
@@ -80,7 +81,7 @@ func BenchmarkImmcheckBytes(b *testing.B) {
 						otherSnapshot := immcheck.NewValueSnapshotWithOptions(&targetObjects[i], options)
 						err := snapshot.CheckImmutabilityAgainst(otherSnapshot)
 						if err != nil {
-							count += 1
+							count++
 						}
 					}
 					b.ReportMetric(float64(count), "muts")
@@ -125,7 +126,7 @@ func BenchmarkImmcheckTransactions(b *testing.B) {
 							otherSnapshot := immcheck.NewValueSnapshotWithOptions(&targetObjects[i], options)
 							err := snapshot.CheckImmutabilityAgainst(otherSnapshot)
 							if err != nil {
-								count += 1
+								count++
 							}
 						}
 						b.ReportMetric(float64(count), "muts")
