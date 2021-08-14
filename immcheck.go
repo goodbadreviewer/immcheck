@@ -1,10 +1,12 @@
 package immcheck
 
 import (
+	"bytes"
 	"fmt"
 	"hash/maphash"
 	"reflect"
 	"runtime"
+	"strconv"
 	"unsafe"
 
 	"github.com/sergi/go-diff/diffmatchpatch"
@@ -27,19 +29,45 @@ type ValueSnapshot struct {
 	stringSnapshot string
 }
 
+func (v *ValueSnapshot) String() string {
+	var buf bytes.Buffer
+	if v.captureOriginFile != "" && v.captureOriginLine != 0 {
+		buf.WriteString("origin: ")
+		buf.WriteString(v.captureOriginFile)
+		buf.WriteByte(':')
+		buf.WriteString(strconv.Itoa(v.captureOriginLine))
+		buf.WriteString("; ")
+	}
+	if v.stringSnapshot != "" {
+		buf.WriteString("stringSnapshot: ")
+		buf.WriteString(v.stringSnapshot)
+		buf.WriteString("; ")
+	}
+	buf.WriteString("checksum: ")
+	buf.WriteString(fmt.Sprintf("%+v", v.checksums))
+	return buf.String()
+}
+
 func NewValueSnapshot(v interface{}) *ValueSnapshot {
-	return newValueSnapshot(v, ImutabilityCheckOptions{})
+	skipTwoFrames := 2
+	snapshot := newValueSnapshot(v, ImutabilityCheckOptions{}, skipTwoFrames)
+	targetValue := reflect.ValueOf(v)
+	snapshot = captureChecksumMap(snapshot, targetValue, ImutabilityCheckOptions{})
+	return snapshot
 }
 
 func NewValueSnapshotWithOptions(v interface{}, options ImutabilityCheckOptions) *ValueSnapshot {
-	return newValueSnapshot(v, options)
+	skipTwoFrames := 2
+	snapshot := newValueSnapshot(v, options, skipTwoFrames)
+	targetValue := reflect.ValueOf(v)
+	snapshot = captureChecksumMap(snapshot, targetValue, options)
+	return snapshot
 }
 
 func (v *ValueSnapshot) CheckImmutabilityAgainst(otherSnapshot *ValueSnapshot) error {
 	originalSnapshot := v
 	newSnapshot := otherSnapshot
-	// TODO: make manual checksum comparisons
-	if reflect.DeepEqual(newSnapshot.checksums, originalSnapshot.checksums) {
+	if equals(newSnapshot, originalSnapshot) {
 		return nil
 	}
 
@@ -93,6 +121,22 @@ func (v *ValueSnapshot) CheckImmutabilityAgainst(otherSnapshot *ValueSnapshot) e
 	)
 }
 
+func equals(newSnapshot *ValueSnapshot, originalSnapshot *ValueSnapshot) bool {
+	if len(newSnapshot.checksums) != len(originalSnapshot.checksums) {
+		return false
+	}
+	for newSnapshotKey, newSnapshotValue := range newSnapshot.checksums {
+		originalSnapshotValue, ok := originalSnapshot.checksums[newSnapshotKey]
+		if !ok {
+			return false
+		}
+		if newSnapshotValue != originalSnapshotValue {
+			return false
+		}
+	}
+	return true
+}
+
 func EnsureImmutability(v interface{}) func() {
 	return ensureImmutability(v, ImutabilityCheckOptions{})
 }
@@ -107,12 +151,14 @@ func ensureImmutability(v interface{}, options ImutabilityCheckOptions) func() {
 	}
 
 	// TODO: introduce re-usage of ValueSnapshots
-	originalSnapshot := newValueSnapshot(v, options)
+	skipThreeFrames := 3
+	originalSnapshot := newValueSnapshot(v, options, skipThreeFrames)
 	targetValue := reflect.ValueOf(v)
 	originalSnapshot = captureChecksumMap(originalSnapshot, targetValue, options)
 
 	return func() {
-		newSnapshot := newValueSnapshot(v, options)
+		thisFunctionWillBeInvokedByUserDirectlySoSkipOnlyTwoFrames := 2
+		newSnapshot := newValueSnapshot(v, options, thisFunctionWillBeInvokedByUserDirectlySoSkipOnlyTwoFrames)
 		newSnapshot = captureChecksumMap(newSnapshot, targetValue, options)
 		checkErr := originalSnapshot.CheckImmutabilityAgainst(newSnapshot)
 		if checkErr != nil {
@@ -121,13 +167,13 @@ func ensureImmutability(v interface{}, options ImutabilityCheckOptions) func() {
 	}
 }
 
-func newValueSnapshot(v interface{}, options ImutabilityCheckOptions) *ValueSnapshot {
+func newValueSnapshot(v interface{}, options ImutabilityCheckOptions, framesToSkip int) *ValueSnapshot {
 	file := ""
 	line := 0
 	if !options.SkipOriginCapturing {
-		skipTwoCallerFramesAndShowOnlyUsersCode := 2
+		skipCallerFramesAndShowOnlyUsersCode := framesToSkip
 		ok := false
-		_, file, line, ok = runtime.Caller(skipTwoCallerFramesAndShowOnlyUsersCode)
+		_, file, line, ok = runtime.Caller(skipCallerFramesAndShowOnlyUsersCode)
 		if !ok {
 			panic("can't capture stack trace")
 		}
@@ -153,8 +199,6 @@ var seed = maphash.MakeSeed()
 
 func captureChecksumMap(snapshot *ValueSnapshot, value reflect.Value, options ImutabilityCheckOptions) *ValueSnapshot {
 	// TODO: introduce pooling of map hashes
-	// TODO: add tests for nils and zero values
-	// TODO: make strict variant that disallow UnsafePointer and Chan
 	h := &maphash.Hash{}
 	h.SetSeed(seed)
 
