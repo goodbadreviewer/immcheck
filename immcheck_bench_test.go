@@ -72,13 +72,15 @@ func BenchmarkImmcheckBytes(b *testing.B) {
 
 					b.ResetTimer()
 					b.ReportAllocs()
+					original := immcheck.NewValueSnapshot()
+					other := immcheck.NewValueSnapshot()
 					for i := 0; i < b.N; i++ {
-						snapshot := immcheck.NewValueSnapshotWithOptions(&targetObjects[i], options)
+						snapshot := immcheck.CaptureSnapshotWithOptions(&targetObjects[i], original, options)
 						rndValue := rand.Intn(100)
 						if rndValue < mutationPercent {
 							targetObjects[i][0] = byte(rndValue)
 						}
-						otherSnapshot := immcheck.NewValueSnapshotWithOptions(&targetObjects[i], options)
+						otherSnapshot := immcheck.CaptureSnapshotWithOptions(&targetObjects[i], other, options)
 						err := snapshot.CheckImmutabilityAgainst(otherSnapshot)
 						if err != nil {
 							count++
@@ -117,13 +119,15 @@ func BenchmarkImmcheckTransactions(b *testing.B) {
 
 						b.ResetTimer()
 						b.ReportAllocs()
+						original := immcheck.NewValueSnapshot()
+						other := immcheck.NewValueSnapshot()
 						for i := 0; i < b.N; i++ {
-							snapshot := immcheck.NewValueSnapshotWithOptions(&targetObjects[i], options)
+							snapshot := immcheck.CaptureSnapshotWithOptions(&targetObjects[i], original, options)
 							rndValue := rand.Intn(100)
 							if rndValue < mutationPercent {
 								targetObjects[i][0].Amount.Amount = Amount(rndValue)
 							}
-							otherSnapshot := immcheck.NewValueSnapshotWithOptions(&targetObjects[i], options)
+							otherSnapshot := immcheck.CaptureSnapshotWithOptions(&targetObjects[i], other, options)
 							err := snapshot.CheckImmutabilityAgainst(otherSnapshot)
 							if err != nil {
 								count++

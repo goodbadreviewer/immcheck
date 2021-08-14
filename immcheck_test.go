@@ -25,10 +25,16 @@ func TestSimpleCounterManualCheck(t *testing.T) {
 	uintCounter := uint64(35)
 	uintCounter++
 
+	expectPanic(t, func() {
+		snapshot := immcheck.NewValueSnapshot()
+		otherSnapshot := immcheck.NewValueSnapshot()
+		_ = snapshot.CheckImmutabilityAgainst(otherSnapshot)
+	}, immcheck.InvalidSnapshotStateError)
+
 	{
 		// check that no mutation is fine
-		snapshot := immcheck.NewValueSnapshot(&uintCounter)
-		otherSnapshot := immcheck.NewValueSnapshot(&uintCounter)
+		snapshot := immcheck.CaptureSnapshot(&uintCounter, immcheck.NewValueSnapshot())
+		otherSnapshot := immcheck.CaptureSnapshot(&uintCounter, immcheck.NewValueSnapshot())
 		err := snapshot.CheckImmutabilityAgainst(otherSnapshot)
 		if err != nil {
 			t.Fatalf("enexpected error happened: %v", err)
@@ -37,9 +43,9 @@ func TestSimpleCounterManualCheck(t *testing.T) {
 
 	{
 		// check that no mutation is fine
-		snapshot := immcheck.NewValueSnapshot(&uintCounter)
+		snapshot := immcheck.CaptureSnapshot(&uintCounter, immcheck.NewValueSnapshot())
 		uintCounter = 74574
-		otherSnapshot := immcheck.NewValueSnapshot(&uintCounter)
+		otherSnapshot := immcheck.CaptureSnapshot(&uintCounter, immcheck.NewValueSnapshot())
 		err := snapshot.CheckImmutabilityAgainst(otherSnapshot)
 		if err == nil {
 			t.Fatal("no mutation detected")
