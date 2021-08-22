@@ -3,13 +3,13 @@ package immcheck
 import (
 	"bytes"
 	"fmt"
-	"hash/maphash"
 	"reflect"
 	"runtime"
 	"strconv"
 	"sync"
 	"unsafe"
 
+	"github.com/cespare/xxhash/v2"
 	"github.com/sergi/go-diff/diffmatchpatch"
 )
 
@@ -214,13 +214,8 @@ func initValueSnapshot(
 	return dst
 }
 
-//nolint:gochecknoglobals // We really need this seed to be global to get the same checksums between different calls
-var seed = maphash.MakeSeed()
-
 func captureChecksumMap(snapshot *ValueSnapshot, value reflect.Value, options ImutabilityCheckOptions) *ValueSnapshot {
 	// TODO: introduce pooling of map hashes
-	h := &maphash.Hash{}
-	h.SetSeed(seed)
 
 	valueKind := value.Kind()
 	switch valueKind {
@@ -249,16 +244,16 @@ func captureChecksumMap(snapshot *ValueSnapshot, value reflect.Value, options Im
 		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
 		reflect.Float32, reflect.Float64, reflect.Complex64, reflect.Complex128:
 		valueBytes := converValueTypeToBytesSlice(value)
-		snapshot = captureRawBytesLevelChecksum(snapshot, h, valueBytes, valueKind)
+		snapshot = captureRawBytesLevelChecksum(snapshot, valueBytes, valueKind)
 		return snapshot
 	case reflect.Struct:
 		valueBytes := converValueTypeToBytesSlice(value)
-		snapshot = captureRawBytesLevelChecksum(snapshot, h, valueBytes, valueKind)
+		snapshot = captureRawBytesLevelChecksum(snapshot, valueBytes, valueKind)
 		snapshot = perFieldSnapshot(snapshot, value, options)
 		return snapshot
 	case reflect.Array, reflect.Slice, reflect.String:
 		valueBytes := convertSliceBasedTypeToByteSlice(value)
-		snapshot = captureRawBytesLevelChecksum(snapshot, h, valueBytes, valueKind)
+		snapshot = captureRawBytesLevelChecksum(snapshot, valueBytes, valueKind)
 		snapshot = perItemSnapshot(snapshot, value, options)
 		return snapshot
 	case reflect.Map:
@@ -277,15 +272,6 @@ func captureChecksumMap(snapshot *ValueSnapshot, value reflect.Value, options Im
 
 func evalKey(valuePointer uintptr, kind reflect.Kind) uintptr {
 	return valuePointer ^ uintptr(kind)
-}
-
-type checksumKey struct {
-	p    uintptr
-	kind reflect.Kind
-}
-
-func (c checksumKey) String() string {
-	return fmt.Sprintf("%s(%#x)", c.kind.String(), c.p)
 }
 
 func valueIsPrimitive(v reflect.Value) bool {
@@ -351,14 +337,11 @@ func capturePointer(snapshot *ValueSnapshot, valuePointer unsafe.Pointer, valueK
 }
 
 func captureRawBytesLevelChecksum(
-	snapshot *ValueSnapshot, hash *maphash.Hash,
+	snapshot *ValueSnapshot,
 	valueBytes []byte, valueKind reflect.Kind,
 ) *ValueSnapshot {
-
-	hash.Reset()
-	_, _ = hash.Write(valueBytes)
-	hashSum := hash.Sum64()
-	snapshot.checksums[evalKey(uintptr(hashSum), valueKind)] = uint64(hashSum)
+	hashSum := xxhash.Sum64(valueBytes)
+	snapshot.checksums[evalKey(uintptr(hashSum), valueKind)] = hashSum
 	return snapshot
 }
 
@@ -399,8 +382,6 @@ func pointerOfValue(value reflect.Value) unsafe.Pointer {
 		return unsafe.Pointer(value.Pointer())
 	case reflect.String:
 		return fetchDataPointerFromString(value)
-	case reflect.Interface:
-		return fetchDataPointerFromInterfaceData(value)
 	}
 	if value.CanAddr() {
 		return unsafe.Pointer(value.Addr().Pointer())
@@ -417,14 +398,7 @@ func fetchDataPointerFromString(value reflect.Value) unsafe.Pointer {
 }
 
 //go:nocheckptr
-func fetchDataPointerFromInterfaceData(value reflect.Value) unsafe.Pointer {
-	runtime.KeepAlive(value)
-	return unsafe.Pointer(value.InterfaceData()[1])
-}
-
-//go:nocheckptr
 func fetchPointerFromValueInterface(value reflect.Value) unsafe.Pointer {
-	runtime.KeepAlive(value)
 	vI := value.Interface()
 	return unsafe.Pointer((*[2]uintptr)(unsafe.Pointer(&vI))[1])
 }
