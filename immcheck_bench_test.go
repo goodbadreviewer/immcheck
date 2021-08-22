@@ -77,7 +77,11 @@ func BenchmarkImmcheckBytes(b *testing.B) {
 	}
 }
 
-func runBytesBenchmark(b *testing.B, targetObjects [][]byte, options immcheck.ImutabilityCheckOptions, mutationPercent int) {
+func runBytesBenchmark(
+	b *testing.B,
+	targetObjects [][]byte,
+	options immcheck.ImutabilityCheckOptions,
+	mutationPercent int) {
 	b.Helper()
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -130,7 +134,11 @@ func BenchmarkImmcheckTransactions(b *testing.B) {
 	}
 }
 
-func runTransactionsBenchmark(b *testing.B, targetObjects [][]*Transaction, options immcheck.ImutabilityCheckOptions, mutationPercent int) {
+func runTransactionsBenchmark(
+	b *testing.B,
+	targetObjects [][]*Transaction,
+	options immcheck.ImutabilityCheckOptions,
+	mutationPercent int) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	original := immcheck.NewValueSnapshot()
