@@ -27,7 +27,7 @@ type ValueSnapshot struct {
 	captureOriginFile *bytes.Buffer
 	captureOriginLine int
 
-	checksums      map[checksumKey]uint64
+	checksums      map[uintptr]uint64
 	stringSnapshot *bytes.Buffer
 }
 
@@ -186,7 +186,7 @@ func newValueSnapshot() *ValueSnapshot {
 	return &ValueSnapshot{
 		captureOriginFile: &bytes.Buffer{},
 		captureOriginLine: 0,
-		checksums:         make(map[checksumKey]uint64, oneBucketCapacity),
+		checksums:         make(map[uintptr]uint64, oneBucketCapacity),
 		stringSnapshot:    &bytes.Buffer{},
 	}
 }
@@ -239,7 +239,7 @@ func captureChecksumMap(snapshot *ValueSnapshot, value reflect.Value, options Im
 			return capturePointer(snapshot, valuePointer, valueKind)
 		}
 		// detect ref loop and skip
-		if _, ok := snapshot.checksums[checksumKey{p: uintptr(valuePointer), kind: valueKind}]; ok {
+		if _, ok := snapshot.checksums[evalKey(uintptr(valuePointer), valueKind)]; ok {
 			return snapshot
 		}
 		snapshot = capturePointer(snapshot, valuePointer, valueKind)
@@ -266,13 +266,17 @@ func captureChecksumMap(snapshot *ValueSnapshot, value reflect.Value, options Im
 		if value.IsNil() || value.IsZero() {
 			return capturePointer(snapshot, valuePointer, valueKind)
 		}
-		snapshot.checksums[checksumKey{p: uintptr(valuePointer), kind: valueKind}] = uint64(value.Len())
+		snapshot.checksums[evalKey(uintptr(valuePointer), valueKind)] = uint64(value.Len())
 		snapshot = perEntrySnapshot(snapshot, value, options)
 		return snapshot
 	case reflect.Invalid:
 		panic(fmt.Errorf("%w, unsupported type kind: %v", UnsupportedTypeError, valueKind.String()))
 	}
 	return snapshot
+}
+
+func evalKey(valuePointer uintptr, kind reflect.Kind) uintptr {
+	return valuePointer ^ uintptr(kind)
 }
 
 type checksumKey struct {
@@ -342,7 +346,7 @@ func perItemSnapshot(snapshot *ValueSnapshot, value reflect.Value, options Imuta
 }
 
 func capturePointer(snapshot *ValueSnapshot, valuePointer unsafe.Pointer, valueKind reflect.Kind) *ValueSnapshot {
-	snapshot.checksums[checksumKey{p: uintptr(valuePointer), kind: valueKind}] = uint64(uintptr(valuePointer))
+	snapshot.checksums[evalKey(uintptr(valuePointer), valueKind)] = uint64(uintptr(valuePointer))
 	return snapshot
 }
 
@@ -353,7 +357,8 @@ func captureRawBytesLevelChecksum(
 
 	hash.Reset()
 	_, _ = hash.Write(valueBytes)
-	snapshot.checksums[checksumKey{p: uintptr(hash.Sum64()), kind: valueKind}] = hash.Sum64()
+	hashSum := hash.Sum64()
+	snapshot.checksums[evalKey(uintptr(hashSum), valueKind)] = uint64(hashSum)
 	return snapshot
 }
 
@@ -397,11 +402,11 @@ func pointerOfValue(value reflect.Value) unsafe.Pointer {
 	case reflect.Interface:
 		return fetchDataPointerFromInterfaceData(value)
 	}
-	if value.CanInterface() {
-		return fetchPointerFromValueInterface(value)
-	}
 	if value.CanAddr() {
 		return unsafe.Pointer(value.Addr().Pointer())
+	}
+	if value.CanInterface() {
+		return fetchPointerFromValueInterface(value)
 	}
 	panic(fmt.Sprintf("can't get pointer to value. kind: %#v; value: %#v", value.Kind().String(), value))
 }
@@ -430,7 +435,7 @@ func (m mutationDetectionError) Error() string {
 	return string(m)
 }
 
-func checksumEquals(newChecksum map[checksumKey]uint64, originalChecksum map[checksumKey]uint64) bool {
+func checksumEquals(newChecksum map[uintptr]uint64, originalChecksum map[uintptr]uint64) bool {
 	if len(newChecksum) != len(originalChecksum) {
 		return false
 	}

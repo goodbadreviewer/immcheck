@@ -70,27 +70,32 @@ func BenchmarkImmcheckBytes(b *testing.B) {
 						localRand.Read(targetObjects[i])
 					}
 
-					b.ResetTimer()
-					b.ReportAllocs()
-					original := immcheck.NewValueSnapshot()
-					other := immcheck.NewValueSnapshot()
-					for i := 0; i < b.N; i++ {
-						snapshot := immcheck.CaptureSnapshotWithOptions(&targetObjects[i], original, options)
-						rndValue := rand.Intn(100)
-						if rndValue < mutationPercent {
-							targetObjects[i][0] = byte(rndValue)
-						}
-						otherSnapshot := immcheck.CaptureSnapshotWithOptions(&targetObjects[i], other, options)
-						err := snapshot.CheckImmutabilityAgainst(otherSnapshot)
-						if err != nil {
-							count++
-						}
-					}
-					b.ReportMetric(float64(count), "muts")
+					runBytesBenchmark(b, targetObjects, options, mutationPercent)
 				})
 			}
 		}
 	}
+}
+
+func runBytesBenchmark(b *testing.B, targetObjects [][]byte, options immcheck.ImutabilityCheckOptions, mutationPercent int) {
+	b.Helper()
+	b.ResetTimer()
+	b.ReportAllocs()
+	original := immcheck.NewValueSnapshot()
+	other := immcheck.NewValueSnapshot()
+	for i := 0; i < b.N; i++ {
+		snapshot := immcheck.CaptureSnapshotWithOptions(&targetObjects[i], original, options)
+		rndValue := rand.Intn(100)
+		if rndValue < mutationPercent {
+			targetObjects[i][0] = byte(rndValue)
+		}
+		otherSnapshot := immcheck.CaptureSnapshotWithOptions(&targetObjects[i], other, options)
+		err := snapshot.CheckImmutabilityAgainst(otherSnapshot)
+		if err != nil {
+			count++
+		}
+	}
+	b.ReportMetric(float64(count), "muts")
 }
 
 func BenchmarkImmcheckTransactions(b *testing.B) {
@@ -117,28 +122,32 @@ func BenchmarkImmcheckTransactions(b *testing.B) {
 							}
 						}
 
-						b.ResetTimer()
-						b.ReportAllocs()
-						original := immcheck.NewValueSnapshot()
-						other := immcheck.NewValueSnapshot()
-						for i := 0; i < b.N; i++ {
-							snapshot := immcheck.CaptureSnapshotWithOptions(&targetObjects[i], original, options)
-							rndValue := rand.Intn(100)
-							if rndValue < mutationPercent {
-								targetObjects[i][0].Amount.Amount = Amount(rndValue)
-							}
-							otherSnapshot := immcheck.CaptureSnapshotWithOptions(&targetObjects[i], other, options)
-							err := snapshot.CheckImmutabilityAgainst(otherSnapshot)
-							if err != nil {
-								count++
-							}
-						}
-						b.ReportMetric(float64(count), "muts")
+						runTransactionsBenchmark(b, targetObjects, options, mutationPercent)
 					})
 				}
 			}
 		}
 	}
+}
+
+func runTransactionsBenchmark(b *testing.B, targetObjects [][]*Transaction, options immcheck.ImutabilityCheckOptions, mutationPercent int) {
+	b.ResetTimer()
+	b.ReportAllocs()
+	original := immcheck.NewValueSnapshot()
+	other := immcheck.NewValueSnapshot()
+	for i := 0; i < b.N; i++ {
+		snapshot := immcheck.CaptureSnapshotWithOptions(&targetObjects[i], original, options)
+		rndValue := rand.Intn(100)
+		if rndValue < mutationPercent {
+			targetObjects[i][0].Amount.Amount = Amount(rndValue)
+		}
+		otherSnapshot := immcheck.CaptureSnapshotWithOptions(&targetObjects[i], other, options)
+		err := snapshot.CheckImmutabilityAgainst(otherSnapshot)
+		if err != nil {
+			count++
+		}
+	}
+	b.ReportMetric(float64(count), "muts")
 }
 
 type CurrencyCode int
