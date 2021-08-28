@@ -1,12 +1,15 @@
 name: golangci-lint
 on:
   push:
-    tags:
-      - v*
-    branches:
-      - main
+    branches: [ main ]
   pull_request:
-      - main
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to create'
+        required: true
+        default: 'v0.0.0'
 jobs:
   golangci:
     name: lint
