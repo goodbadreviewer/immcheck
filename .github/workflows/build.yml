@@ -26,3 +26,8 @@ jobs:
 
       - name: Test
         run: go test -v -race -coverprofile coverage.out ./...
+
+      - name: Install goveralls
+        run: go install github.com/mattn/goveralls@latest
+      - name: Send coverage
+        run: goveralls -coverprofile=coverage.out -service=github
