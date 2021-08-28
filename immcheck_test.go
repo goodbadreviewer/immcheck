@@ -45,6 +45,16 @@ func TestSimpleCounter(t *testing.T) {
 	checkMutationDetectionMessage(t, panicMessage)
 }
 
+func TestNilTargetValue(t *testing.T) {
+	t.Parallel()
+	panicMessage := expectPanic(t, func() {
+		immcheck.EnsureImmutability(nil)()
+	}, immcheck.UnsupportedTypeError)
+	if !strings.Contains(panicMessage, "target value can't be nil") {
+		t.Fatal("wrong error message")
+	}
+}
+
 func TestSimpleCounterManualCheck(t *testing.T) {
 	t.Parallel()
 	uintCounter := uint64(35)
@@ -59,6 +69,7 @@ func TestSimpleCounterManualCheck(t *testing.T) {
 	{
 		// check that no mutation is fine
 		snapshot := immcheck.CaptureSnapshot(&uintCounter, immcheck.NewValueSnapshot())
+		fmt.Println(snapshot)
 		otherSnapshot := immcheck.CaptureSnapshot(&uintCounter, immcheck.NewValueSnapshot())
 		err := snapshot.CheckImmutabilityAgainst(otherSnapshot)
 		if err != nil {
@@ -70,7 +81,10 @@ func TestSimpleCounterManualCheck(t *testing.T) {
 		// check that no mutation is fine
 		snapshot := immcheck.CaptureSnapshot(&uintCounter, immcheck.NewValueSnapshot())
 		uintCounter = 74574
-		otherSnapshot := immcheck.CaptureSnapshot(&uintCounter, immcheck.NewValueSnapshot())
+		otherSnapshot := immcheck.CaptureSnapshotWithOptions(
+			&uintCounter, immcheck.NewValueSnapshot(),
+			immcheck.ImmutabilityCheckOptions{},
+		)
 		err := snapshot.CheckImmutabilityAgainst(otherSnapshot)
 		if err == nil {
 			t.Fatal("no mutation detected")
@@ -86,11 +100,11 @@ func TestSimpleCounterWithOptions(t *testing.T) {
 	t.Parallel()
 	uintCounter := uint64(35)
 	uintCounter++
-	immcheck.EnsureImmutabilityWithOptions(&uintCounter, immcheck.ImutabilityCheckOptions{
+	immcheck.EnsureImmutabilityWithOptions(&uintCounter, immcheck.ImmutabilityCheckOptions{
 		SkipOriginCapturing: true,
 	})() // check that no mutation is fine
 	panicMessage := expectMutationPanic(t, func() {
-		defer immcheck.EnsureImmutabilityWithOptions(&uintCounter, immcheck.ImutabilityCheckOptions{
+		defer immcheck.EnsureImmutabilityWithOptions(&uintCounter, immcheck.ImmutabilityCheckOptions{
 			SkipOriginCapturing: true,
 		})()
 		uintCounter = 74574
@@ -359,7 +373,7 @@ func TestRecursiveInterfaceBasedLinkedList(t *testing.T) {
 
 func TestUnsafePointer(t *testing.T) {
 	t.Parallel()
-	allowUnsafe := immcheck.ImutabilityCheckOptions{AllowInherintlyUnsafeTypes: true}
+	allowUnsafe := immcheck.ImmutabilityCheckOptions{AllowInherentlyUnsafeTypes: true}
 	type person struct {
 		age uint16
 		ptr unsafe.Pointer
@@ -393,7 +407,7 @@ func TestUnsafePointer(t *testing.T) {
 
 func TestFunction(t *testing.T) {
 	t.Parallel()
-	allowUnsafe := immcheck.ImutabilityCheckOptions{AllowInherintlyUnsafeTypes: true}
+	allowUnsafe := immcheck.ImmutabilityCheckOptions{AllowInherentlyUnsafeTypes: true}
 	type person struct {
 		age uint16
 		f   func()
@@ -420,7 +434,7 @@ func TestFunction(t *testing.T) {
 
 func TestChannel(t *testing.T) {
 	t.Parallel()
-	allowUnsafe := immcheck.ImutabilityCheckOptions{AllowInherintlyUnsafeTypes: true}
+	allowUnsafe := immcheck.ImmutabilityCheckOptions{AllowInherentlyUnsafeTypes: true}
 	type person struct {
 		age uint16
 		ch  chan int
@@ -501,7 +515,7 @@ func TestPointerToSubslice(t *testing.T) {
 
 func TestMap(t *testing.T) {
 	t.Parallel()
-	allowUnsafe := immcheck.ImutabilityCheckOptions{AllowInherintlyUnsafeTypes: true}
+	allowUnsafe := immcheck.ImmutabilityCheckOptions{AllowInherentlyUnsafeTypes: true}
 	type person struct {
 		age    uint16
 		height uint8
@@ -552,7 +566,7 @@ func checkUnsupportedTypeMessage(t *testing.T, panicMessage string, expectedType
 			"UnsafePointer, Func, and Chan types are not supported, "+
 			"since there is no way for us to fully verify immutability for these types. "+
 			"If you still want to proceed and ignore fields of such type "+
-			"use ImutabilityCheckOptions.AllowInherintlyUnsafeTypes option. Unsupported type kind: ",
+			"use ImmutabilityCheckOptions.AllowInherentlyUnsafeTypes option. Unsupported type kind: ",
 	)
 	sufixIsCorrect := strings.HasSuffix(panicMessage, expectedTypeStringInErrorMessage)
 	t.Log(panicMessage)
