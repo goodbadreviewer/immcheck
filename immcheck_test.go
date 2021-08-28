@@ -11,6 +11,7 @@ import (
 )
 
 func TestSimpleCounter(t *testing.T) {
+	t.Parallel()
 	uintCounter := uint64(35)
 	uintCounter++
 	immcheck.EnsureImmutability(&uintCounter)() // check that no mutation is fine
@@ -22,6 +23,7 @@ func TestSimpleCounter(t *testing.T) {
 }
 
 func TestSimpleCounterManualCheck(t *testing.T) {
+	t.Parallel()
 	uintCounter := uint64(35)
 	uintCounter++
 
@@ -58,16 +60,15 @@ func TestSimpleCounterManualCheck(t *testing.T) {
 }
 
 func TestSimpleCounterWithOptions(t *testing.T) {
+	t.Parallel()
 	uintCounter := uint64(35)
 	uintCounter++
 	immcheck.EnsureImmutabilityWithOptions(&uintCounter, immcheck.ImutabilityCheckOptions{
-		SkipOriginCapturing:         true,
-		SkipStringSnapshotCapturing: true,
+		SkipOriginCapturing: true,
 	})() // check that no mutation is fine
 	panicMessage := expectMutationPanic(t, func() {
 		defer immcheck.EnsureImmutabilityWithOptions(&uintCounter, immcheck.ImutabilityCheckOptions{
-			SkipOriginCapturing:         true,
-			SkipStringSnapshotCapturing: true,
+			SkipOriginCapturing: true,
 		})()
 		uintCounter = 74574
 	})
@@ -75,6 +76,7 @@ func TestSimpleCounterWithOptions(t *testing.T) {
 }
 
 func TestUnsafeWithNotAllowedUnsafeOption(t *testing.T) {
+	t.Parallel()
 	function := func() {}
 	channel := make(chan int)
 	counter := uint(0)
@@ -100,6 +102,7 @@ func TestUnsafeWithNotAllowedUnsafeOption(t *testing.T) {
 }
 
 func TestSliceOfIntegers(t *testing.T) {
+	t.Parallel()
 	ints := make([]int, 1)
 	ints[0] = 1
 	immcheck.EnsureImmutability(&ints)() // check that no mutation is fine
@@ -111,6 +114,7 @@ func TestSliceOfIntegers(t *testing.T) {
 }
 
 func TestSliceOfFloats(t *testing.T) {
+	t.Parallel()
 	floats := make([]float64, 10)
 	floats[0] = 3.0
 	immcheck.EnsureImmutability(&floats)() // check that no mutation is fine
@@ -122,6 +126,7 @@ func TestSliceOfFloats(t *testing.T) {
 }
 
 func TestPrimitiveStruct(t *testing.T) {
+	t.Parallel()
 	type person struct {
 		age    uint16
 		height uint8
@@ -140,6 +145,7 @@ func TestPrimitiveStruct(t *testing.T) {
 }
 
 func TestSliceOfPrimitiveStructs(t *testing.T) {
+	t.Parallel()
 	type person struct {
 		age    uint16
 		height uint8
@@ -156,6 +162,7 @@ func TestSliceOfPrimitiveStructs(t *testing.T) {
 }
 
 func TestSliceOfNonPrimitiveStructs(t *testing.T) {
+	t.Parallel()
 	type person struct {
 		name   string
 		age    uint16
@@ -173,6 +180,7 @@ func TestSliceOfNonPrimitiveStructs(t *testing.T) {
 }
 
 func TestMutationOfStringPropertyOfNestedNonPrimitiveStruct(t *testing.T) {
+	t.Parallel()
 	type person struct {
 		name   string
 		age    uint16
@@ -214,6 +222,7 @@ func TestMutationOfStringPropertyOfNestedNonPrimitiveStruct(t *testing.T) {
 }
 
 func TestMutationOfUnsafeStringPropertyOfNestedNonPrimitiveStruct(t *testing.T) {
+	t.Parallel()
 	type person struct {
 		name   string
 		age    uint16
@@ -257,6 +266,7 @@ func TestMutationOfUnsafeStringPropertyOfNestedNonPrimitiveStruct(t *testing.T) 
 }
 
 func TestLinkedList(t *testing.T) {
+	t.Parallel()
 	type node struct {
 		value int
 		next  *node
@@ -279,6 +289,7 @@ func TestLinkedList(t *testing.T) {
 }
 
 func TestRecursiveLinkedList(t *testing.T) {
+	t.Parallel()
 	type node struct {
 		value int
 		next  *node
@@ -301,6 +312,7 @@ func TestRecursiveLinkedList(t *testing.T) {
 }
 
 func TestRecursiveInterfaceBasedLinkedList(t *testing.T) {
+	t.Parallel()
 	type node struct {
 		value int
 		next  interface{}
@@ -323,6 +335,7 @@ func TestRecursiveInterfaceBasedLinkedList(t *testing.T) {
 }
 
 func TestUnsafePointer(t *testing.T) {
+	t.Parallel()
 	allowUnsafe := immcheck.ImutabilityCheckOptions{AllowInherintlyUnsafeTypes: true}
 	type person struct {
 		age uint16
@@ -356,6 +369,7 @@ func TestUnsafePointer(t *testing.T) {
 }
 
 func TestFunction(t *testing.T) {
+	t.Parallel()
 	allowUnsafe := immcheck.ImutabilityCheckOptions{AllowInherintlyUnsafeTypes: true}
 	type person struct {
 		age uint16
@@ -382,6 +396,7 @@ func TestFunction(t *testing.T) {
 }
 
 func TestChannel(t *testing.T) {
+	t.Parallel()
 	allowUnsafe := immcheck.ImutabilityCheckOptions{AllowInherintlyUnsafeTypes: true}
 	type person struct {
 		age uint16
@@ -413,6 +428,7 @@ func TestChannel(t *testing.T) {
 }
 
 func TestPrimitiveStructBehindInterface(t *testing.T) {
+	t.Parallel()
 	type person struct {
 		age    uint16
 		height uint8
@@ -431,6 +447,7 @@ func TestPrimitiveStructBehindInterface(t *testing.T) {
 }
 
 func TestPointerToSubslice(t *testing.T) {
+	t.Parallel()
 	type person struct {
 		age    uint16
 		height uint8
@@ -460,6 +477,7 @@ func TestPointerToSubslice(t *testing.T) {
 }
 
 func TestMap(t *testing.T) {
+	t.Parallel()
 	allowUnsafe := immcheck.ImutabilityCheckOptions{AllowInherintlyUnsafeTypes: true}
 	type person struct {
 		age    uint16

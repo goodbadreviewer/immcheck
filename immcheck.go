@@ -10,36 +10,50 @@ import (
 	"unsafe"
 
 	"github.com/cespare/xxhash/v2"
-	"github.com/sergi/go-diff/diffmatchpatch"
 )
 
 const MutationDetectedError mutationDetectionError = "mutation of immutable value detected"
 const InvalidSnapshotStateError mutationDetectionError = "invalid snapshot state"
 const UnsupportedTypeError mutationDetectionError = "unsupported type for immutability check"
 
+// ImutabilityCheckOptions configures check.
 type ImutabilityCheckOptions struct {
-	SkipOriginCapturing         bool
-	SkipStringSnapshotCapturing bool
-	AllowInherintlyUnsafeTypes  bool
+	// By default immcheck captures caller information to report snapshot origin.
+	// But you can skip it to get a tiny bit more performance.
+	SkipOriginCapturing bool
+	// By default, immcheck doesn't allow reflect.UnsafePointer, reflect.Func and reflect.Chan
+	// inside target value, but you can override this.
+	AllowInherintlyUnsafeTypes bool
 }
 
+// This is a re-usable object of snapshot value that works similar to bytes.Buffer.
+// You can new ValueSnapshot object using immcheck.NewValueSnapshot method.
+// Capture snapshots into it using immcheck.CaptureSnapshot or immcheck.CaptureSnapshotWithOptions.
+// Then you can compare snapshots using ValueSnapshot.CheckImmutabilityAgainst method.
+// Then you can re-use snapshots by calling ValueSnapshot.Reset.
+// This approach can help you to avoid extra allocations.
 type ValueSnapshot struct {
 	captureOriginFile *bytes.Buffer
 	captureOriginLine int
 
-	checksums      map[uintptr]uint64
-	stringSnapshot *bytes.Buffer
+	checksums map[uintptr]uint64
 }
 
+// NewValueSnapshot creates new re-usable object of snapshot object.
+func NewValueSnapshot() *ValueSnapshot {
+	return newValueSnapshot()
+}
+
+// Reset clear internal state of ValueSnapshot, so it can be re-used.
 func (v *ValueSnapshot) Reset() {
 	v.captureOriginFile.Reset()
 	v.captureOriginLine = 0
 	for key := range v.checksums {
 		delete(v.checksums, key)
 	}
-	v.stringSnapshot.Reset()
 }
 
+// String provides string representation of ValueSnapshot.
 func (v *ValueSnapshot) String() string {
 	buf := &bytes.Buffer{}
 	if v.captureOriginFile.Len() == 0 && v.captureOriginLine != 0 {
@@ -49,36 +63,13 @@ func (v *ValueSnapshot) String() string {
 		buf.WriteString(strconv.Itoa(v.captureOriginLine))
 		buf.WriteString("; ")
 	}
-	if v.stringSnapshot.Len() == 0 {
-		buf.WriteString("stringSnapshot: ")
-		buf.Write(v.stringSnapshot.Bytes())
-		buf.WriteString("; ")
-	}
-	buf.WriteString("checksum: ")
-	fmt.Fprintf(buf, "%v", v.checksums)
+	buf.WriteString("checksumSize: ")
+	fmt.Fprintf(buf, "%v", len(v.checksums))
 	return buf.String()
 }
 
-func NewValueSnapshot() *ValueSnapshot {
-	return newValueSnapshot()
-}
-
-func CaptureSnapshot(v interface{}, dst *ValueSnapshot) *ValueSnapshot {
-	skipTwoFrames := 2
-	snapshot := initValueSnapshot(dst, v, ImutabilityCheckOptions{}, skipTwoFrames)
-	targetValue := reflect.ValueOf(v)
-	snapshot = captureChecksumMap(snapshot, targetValue, ImutabilityCheckOptions{})
-	return snapshot
-}
-
-func CaptureSnapshotWithOptions(v interface{}, dst *ValueSnapshot, options ImutabilityCheckOptions) *ValueSnapshot {
-	skipTwoFrames := 2
-	snapshot := initValueSnapshot(dst, v, options, skipTwoFrames)
-	targetValue := reflect.ValueOf(v)
-	snapshot = captureChecksumMap(snapshot, targetValue, options)
-	return snapshot
-}
-
+// CheckImmutabilityAgainst verifies that otherSnapshot is exactly the same as this one.
+// Returns immcheck.MutationDetectedError if snapshots are different.
 func (v *ValueSnapshot) CheckImmutabilityAgainst(otherSnapshot *ValueSnapshot) error {
 	if len(v.checksums) == 0 || len(otherSnapshot.checksums) == 0 {
 		panic(fmt.Errorf("%w snapshot is empty", InvalidSnapshotStateError))
@@ -104,45 +95,43 @@ func (v *ValueSnapshot) CheckImmutabilityAgainst(otherSnapshot *ValueSnapshot) e
 		)
 	}
 
-	diff := diffmatchpatch.New()
-
-	stringSnapshotsAndComparison := ""
-	if originalSnapshot.stringSnapshot.Len() != 0 && newSnapshot.stringSnapshot.Len() != 0 {
-		snapshotDiffs := diff.DiffMainRunes(
-			bytes.Runes(originalSnapshot.stringSnapshot.Bytes()),
-			bytes.Runes(newSnapshot.stringSnapshot.Bytes()),
-			false,
-		)
-		stringSnapshotsAndComparison = fmt.Sprintf(
-			"\noldSnapshot: %+v\nnewSnapshot: %+v\nPreaty Diff: %v\n",
-			originalSnapshot.stringSnapshot, newSnapshot.stringSnapshot,
-			diff.DiffPrettyText(snapshotDiffs),
-		)
-	}
-
-	checksumDiffs := diff.DiffMain(
-		fmt.Sprint(originalSnapshot.checksums),
-		fmt.Sprint(newSnapshot.checksums),
-		false,
-	)
 	return fmt.Errorf(
-		"%w\n"+
-			"%v%v"+
-			"oldSnapshot.checksum: %+v\nnewSnapshot.checksum: %+v\n"+
-			"Checksum Diff       : %v\n"+
-			"%v",
-		MutationDetectedError,
-		originalSnapshotOrigin, newSnapshotOrigin,
-		originalSnapshot.checksums, newSnapshot.checksums,
-		diff.DiffPrettyText(checksumDiffs),
-		stringSnapshotsAndComparison,
+		"%w\n%v%v",
+		MutationDetectedError, originalSnapshotOrigin, newSnapshotOrigin,
 	)
 }
 
+// CaptureSnapshot creates lightweight checksum representation of v and stores if into dst.
+// Returns modified dst object.
+func CaptureSnapshot(v interface{}, dst *ValueSnapshot) *ValueSnapshot {
+	skipTwoFrames := 2
+	snapshot := initValueSnapshot(dst, ImutabilityCheckOptions{}, skipTwoFrames)
+	targetValue := reflect.ValueOf(v)
+	snapshot = captureChecksumMap(snapshot, targetValue, ImutabilityCheckOptions{})
+	return snapshot
+}
+
+// CaptureSnapshot creates lightweight checksum according to settings specified in options,
+// representation of v and stores if into dst. Returns modified dst object.
+func CaptureSnapshotWithOptions(v interface{}, dst *ValueSnapshot, options ImutabilityCheckOptions) *ValueSnapshot {
+	skipTwoFrames := 2
+	snapshot := initValueSnapshot(dst, options, skipTwoFrames)
+	targetValue := reflect.ValueOf(v)
+	snapshot = captureChecksumMap(snapshot, targetValue, options)
+	return snapshot
+}
+
+// EnsureImmutability captures checksum of v and returns function that can be called to verify that v was not mutated.
+// Returned function can be called multiple times.
+// If mutation is detected returned function will panic.
 func EnsureImmutability(v interface{}) func() {
 	return ensureImmutability(v, ImutabilityCheckOptions{})
 }
 
+// EnsureImmutability captures checksum of v according to settings specified in options
+// and returns function that can be called to verify that v was not mutated.
+// Returned function can be called multiple times.
+// If mutation is detected returned function will panic.
 func EnsureImmutabilityWithOptions(v interface{}, options ImutabilityCheckOptions) func() {
 	return ensureImmutability(v, options)
 }
@@ -158,11 +147,9 @@ func ensureImmutability(v interface{}, options ImutabilityCheckOptions) func() {
 	if v == nil {
 		return func() {} // TODO: panic here
 	}
-
-	// TODO: introduce re-usage of ValueSnapshots
 	originalSnapshot := tempSnapshotsPool.Get().(*ValueSnapshot) // this snapshot will be returned to pool in a callback
 	skipThreeFrames := 3
-	originalSnapshot = initValueSnapshot(originalSnapshot, v, options, skipThreeFrames)
+	originalSnapshot = initValueSnapshot(originalSnapshot, options, skipThreeFrames)
 	targetValue := reflect.ValueOf(v)
 	originalSnapshot = captureChecksumMap(originalSnapshot, targetValue, options)
 
@@ -172,7 +159,7 @@ func ensureImmutability(v interface{}, options ImutabilityCheckOptions) func() {
 		defer tempSnapshotsPool.Put(originalSnapshot)
 
 		thisFuncWillBeInvokedByClientCodeSoSkipOnlyTwoFrames := 2
-		newSnapshot = initValueSnapshot(newSnapshot, v, options, thisFuncWillBeInvokedByClientCodeSoSkipOnlyTwoFrames)
+		newSnapshot = initValueSnapshot(newSnapshot, options, thisFuncWillBeInvokedByClientCodeSoSkipOnlyTwoFrames)
 		newSnapshot = captureChecksumMap(newSnapshot, targetValue, options)
 		checkErr := originalSnapshot.CheckImmutabilityAgainst(newSnapshot)
 		if checkErr != nil {
@@ -187,12 +174,11 @@ func newValueSnapshot() *ValueSnapshot {
 		captureOriginFile: &bytes.Buffer{},
 		captureOriginLine: 0,
 		checksums:         make(map[uintptr]uint64, oneBucketCapacity),
-		stringSnapshot:    &bytes.Buffer{},
 	}
 }
 
 func initValueSnapshot(
-	dst *ValueSnapshot, value interface{},
+	dst *ValueSnapshot,
 	options ImutabilityCheckOptions, framesToSkip int) *ValueSnapshot {
 	dst.Reset()
 	if !options.SkipOriginCapturing {
@@ -205,18 +191,10 @@ func initValueSnapshot(
 		dst.captureOriginFile.WriteString(file)
 		dst.captureOriginLine = line
 	}
-
-	if !options.SkipStringSnapshotCapturing {
-		fmt.Fprintf(dst.stringSnapshot, "%#+v", value)
-	}
-
-	//TODO: pool ValueSnapshot instances, dump strings to reused byte slices and reuse checksum maps, etc
 	return dst
 }
 
 func captureChecksumMap(snapshot *ValueSnapshot, value reflect.Value, options ImutabilityCheckOptions) *ValueSnapshot {
-	// TODO: introduce pooling of map hashes
-
 	valueKind := value.Kind()
 	switch valueKind {
 	case reflect.UnsafePointer, reflect.Func, reflect.Chan:
