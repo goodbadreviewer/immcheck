@@ -2,7 +2,4 @@ module github.com/goodbadreviewer/immcheck
 
 go 1.16
 
-require (
-	github.com/cespare/xxhash/v2 v2.1.1
-	github.com/sergi/go-diff v1.2.0
-)
+require github.com/cespare/xxhash/v2 v2.1.1

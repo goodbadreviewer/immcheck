@@ -8,29 +8,6 @@ import (
 	"github.com/goodbadreviewer/immcheck"
 )
 
-var settings = []immcheck.ImutabilityCheckOptions{
-	{
-		SkipOriginCapturing:         false,
-		SkipStringSnapshotCapturing: false,
-		AllowInherintlyUnsafeTypes:  false,
-	},
-	{
-		SkipOriginCapturing:         true,
-		SkipStringSnapshotCapturing: false,
-		AllowInherintlyUnsafeTypes:  false,
-	},
-	{
-		SkipOriginCapturing:         false,
-		SkipStringSnapshotCapturing: true,
-		AllowInherintlyUnsafeTypes:  false,
-	},
-	{
-		SkipOriginCapturing:         true,
-		SkipStringSnapshotCapturing: true,
-		AllowInherintlyUnsafeTypes:  false,
-	},
-}
-
 var sizeOfByteSlice = []int{
 	16 * 1024,
 }
@@ -50,29 +27,21 @@ var sizeOfTxContext = []int{
 var count = 0
 
 func BenchmarkImmcheckBytes(b *testing.B) {
-	for _, options := range settings {
-		for _, targetSize := range sizeOfByteSlice {
-			for _, mutationPercent := range percentOfMutations {
-				benchName := fmt.Sprintf("[%v]byte;muts(%v%%)", targetSize, mutationPercent)
-				if options.SkipStringSnapshotCapturing {
-					benchName += ";NoSnap"
-				}
-				if options.SkipOriginCapturing {
-					benchName += ";NoOrig"
-				}
-				b.Run(benchName, func(b *testing.B) {
-					localRand := rand.New(rand.NewSource(rand.Int63()))
-					count = 0
+	for _, targetSize := range sizeOfByteSlice {
+		for _, mutationPercent := range percentOfMutations {
+			benchName := fmt.Sprintf("[%v]byte;muts(%v%%)", targetSize, mutationPercent)
+			b.Run(benchName, func(b *testing.B) {
+				localRand := rand.New(rand.NewSource(rand.Int63()))
+				count = 0
 
-					targetObjects := make([][]byte, b.N)
-					for i := 0; i < b.N; i++ {
-						targetObjects[i] = make([]byte, targetSize)
-						localRand.Read(targetObjects[i])
-					}
+				targetObjects := make([][]byte, b.N)
+				for i := 0; i < b.N; i++ {
+					targetObjects[i] = make([]byte, targetSize)
+					localRand.Read(targetObjects[i])
+				}
 
-					runBytesBenchmark(b, targetObjects, options, mutationPercent)
-				})
-			}
+				runBytesBenchmark(b, targetObjects, immcheck.ImutabilityCheckOptions{SkipOriginCapturing: true}, mutationPercent)
+			})
 		}
 	}
 }
@@ -103,32 +72,28 @@ func runBytesBenchmark(
 }
 
 func BenchmarkImmcheckTransactions(b *testing.B) {
-	for _, options := range settings {
-		for _, txCnt := range countOfTransactions {
-			for _, ctxSize := range sizeOfTxContext {
-				for _, mutationPercent := range percentOfMutations {
-					benchName := fmt.Sprintf("[%v]txs(%v);muts(%v%%)", txCnt, ctxSize, mutationPercent)
-					if options.SkipStringSnapshotCapturing {
-						benchName += ";NoSnap"
-					}
-					if options.SkipOriginCapturing {
-						benchName += ";NoOrig"
-					}
-					b.Run(benchName, func(b *testing.B) {
-						localRand := rand.New(rand.NewSource(rand.Int63()))
-						count = 0
+	for _, txCnt := range countOfTransactions {
+		for _, ctxSize := range sizeOfTxContext {
+			for _, mutationPercent := range percentOfMutations {
+				benchName := fmt.Sprintf("[%v]txs(%v);muts(%v%%)", txCnt, ctxSize, mutationPercent)
+				b.Run(benchName, func(b *testing.B) {
+					localRand := rand.New(rand.NewSource(rand.Int63()))
+					count = 0
 
-						targetObjects := make([][]*Transaction, b.N)
-						for i := 0; i < b.N; i++ {
-							targetObjects[i] = make([]*Transaction, txCnt)
-							for j := 0; j < txCnt; j++ {
-								targetObjects[i][j] = GenerateTransaction(localRand, ctxSize)
-							}
+					targetObjects := make([][]*Transaction, b.N)
+					for i := 0; i < b.N; i++ {
+						targetObjects[i] = make([]*Transaction, txCnt)
+						for j := 0; j < txCnt; j++ {
+							targetObjects[i][j] = GenerateTransaction(localRand, ctxSize)
 						}
+					}
 
-						runTransactionsBenchmark(b, targetObjects, options, mutationPercent)
-					})
-				}
+					runTransactionsBenchmark(
+						b, targetObjects,
+						immcheck.ImutabilityCheckOptions{SkipOriginCapturing: true},
+						mutationPercent,
+					)
+				})
 			}
 		}
 	}
