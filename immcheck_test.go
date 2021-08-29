@@ -14,6 +14,142 @@ import (
 	"github.com/goodbadreviewer/immcheck"
 )
 
+func TestRaceConditionalFunctionsEnabled(t *testing.T) {
+	if !immcheck.ImmcheckRaceEnabled {
+		t.SkipNow()
+	}
+	t.Parallel()
+	{
+		m := map[string]string{
+			"k1": "v1",
+		}
+		logBuffer := &lockedWriterBuffer{buf: &bytes.Buffer{}}
+		immcheck.RaceCheckImmutabilityOnFinalizationWithOptions(&m, immcheck.Options{
+			Flags:     immcheck.SkipPanicOnDetectedMutation,
+			LogWriter: logBuffer,
+		})
+		m["j1"] = "b1"
+
+		runtime.GC()
+		time.Sleep(10 * time.Millisecond)
+		resultingLog := logBuffer.String()
+		t.Log(resultingLog)
+		logAsExpected := strings.Contains(
+			resultingLog,
+			"[ERROR] runtime mutation detected. value: `&map[string]string{\"j1\":\"b1\", \"k1\":\"v1\"}`; "+
+				"error: mutation of immutable value detected\nimmutable snapshot was captured here ",
+		)
+		if !logAsExpected {
+			t.Fatalf("unnexpected log on finalization: `%v`", resultingLog)
+		}
+	}
+	{
+		m := map[string]string{
+			"k1": "v1",
+		}
+		logBuffer := &lockedWriterBuffer{buf: &bytes.Buffer{}}
+		immcheck.RaceCheckImmutabilityOnFinalizationWithOptions(&m, immcheck.Options{
+			Flags:     immcheck.SkipPanicOnDetectedMutation,
+			LogWriter: logBuffer,
+		})
+		runtime.GC()
+		time.Sleep(10 * time.Millisecond)
+		resultingLog := logBuffer.String()
+		if logBuffer.String() != "" {
+			t.Fatalf("unnexpected log on finalization: %v", resultingLog)
+		}
+	}
+	{
+		ints := make([]int, 1)
+		ints[0] = 1
+		immcheck.RaceEnsureImmutability(&ints)() // check that no mutation is fine
+		panicMessage := expectMutationPanic(t, func() {
+			defer immcheck.RaceEnsureImmutability(&ints)()
+			ints[0] = 2
+		})
+		checkMutationDetectionMessage(t, panicMessage)
+	}
+	{
+		ints := make([]int, 1)
+		ints[0] = 1
+		immcheck.RaceEnsureImmutabilityWithOptions(
+			&ints, immcheck.Options{Flags: immcheck.SkipOriginCapturing},
+		)() // check that no mutation is fine
+		panicMessage := expectMutationPanic(t, func() {
+			defer immcheck.RaceEnsureImmutabilityWithOptions(
+				&ints, immcheck.Options{Flags: immcheck.SkipOriginCapturing},
+			)()
+			ints[0] = 2
+		})
+		checkMutationDetectionMessage(t, panicMessage)
+	}
+}
+
+func TestRaceConditionalFunctionsDisabled(t *testing.T) {
+	if immcheck.ImmcheckRaceEnabled {
+		t.SkipNow()
+	}
+	t.Parallel()
+	{
+		m := map[string]string{
+			"k1": "v1",
+		}
+		logBuffer := &lockedWriterBuffer{buf: &bytes.Buffer{}}
+		immcheck.RaceCheckImmutabilityOnFinalizationWithOptions(&m, immcheck.Options{
+			Flags:     immcheck.SkipPanicOnDetectedMutation,
+			LogWriter: logBuffer,
+		})
+		m["j1"] = "b1"
+
+		runtime.GC()
+		time.Sleep(10 * time.Millisecond)
+		resultingLog := logBuffer.String()
+		if logBuffer.String() != "" {
+			t.Fatalf("unnexpected log on finalization: %v", resultingLog)
+		}
+	}
+	{
+		m := map[string]string{
+			"k1": "v1",
+		}
+		logBuffer := &lockedWriterBuffer{buf: &bytes.Buffer{}}
+		immcheck.RaceCheckImmutabilityOnFinalizationWithOptions(&m, immcheck.Options{
+			Flags:     immcheck.SkipPanicOnDetectedMutation,
+			LogWriter: logBuffer,
+		})
+		runtime.GC()
+		time.Sleep(10 * time.Millisecond)
+		resultingLog := logBuffer.String()
+		if logBuffer.String() != "" {
+			t.Fatalf("unnexpected log on finalization: %v", resultingLog)
+		}
+	}
+	{
+		ints := make([]int, 1)
+		ints[0] = 1
+		immcheck.RaceEnsureImmutability(&ints)() // check that no mutation is fine
+		func() {
+			// Without race flag enabled, this should not panic
+			defer immcheck.RaceEnsureImmutability(&ints)()
+			ints[0] = 2
+		}()
+	}
+	{
+		ints := make([]int, 1)
+		ints[0] = 1
+		immcheck.RaceEnsureImmutabilityWithOptions(
+			&ints, immcheck.Options{Flags: immcheck.SkipOriginCapturing},
+		)() // check that no mutation is fine
+		func() {
+			// Without race flag enabled, this should not panic
+			defer immcheck.RaceEnsureImmutabilityWithOptions(
+				&ints, immcheck.Options{Flags: immcheck.SkipOriginCapturing},
+			)()
+			ints[0] = 2
+		}()
+	}
+}
+
 func TestExample(t *testing.T) {
 	m := map[string]string{
 		"k1": "v1",
@@ -37,6 +173,13 @@ func TestExample(t *testing.T) {
 		// if object remained immutable from this point till garbage collection,
 		// but it will fail this demonstration
 		// immcheck.CheckImmutabilityOnFinalization(&m)
+
+		// this function works only with `-race` or `-tags immcheck` build flags
+		defer immcheck.RaceEnsureImmutability(&m)()
+
+		// this function works only with `-race` or `-tags immcheck` build flags as well
+		// so it can fail this demonstration
+		// immcheck.RaceCheckImmutabilityOnFinalization(&m)
 
 		delete(m, "k1")
 	}()

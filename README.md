@@ -25,6 +25,12 @@ func() {
     // it is also possible to set a finalizer that can check
     // if object remained immutable from this point till garbage collection
     immcheck.CheckImmutabilityOnFinalization(&m)
+    
+    // this function works only with `-race` or `-tags immcheck` build flags
+    defer immcheck.RaceEnsureImmutability(&m)()
+
+    // this function works only with `-race` or `-tags immcheck` build flags as well
+    immcheck.RaceCheckImmutabilityOnFinalization(&m)
 
     delete(m, "k1")
 }()
