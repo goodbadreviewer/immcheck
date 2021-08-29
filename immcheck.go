@@ -3,6 +3,7 @@ package immcheck
 import (
 	"bytes"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"os"
 	"reflect"
@@ -55,7 +56,7 @@ type ValueSnapshot struct {
 	captureOriginFile *bytes.Buffer
 	captureOriginLine int
 
-	checksums map[uintptr]uint64
+	checksums map[uint32]uint32
 }
 
 // NewValueSnapshot creates new re-usable object of snapshot object.
@@ -254,7 +255,7 @@ func newValueSnapshot() *ValueSnapshot {
 	return &ValueSnapshot{
 		captureOriginFile: &bytes.Buffer{},
 		captureOriginLine: 0,
-		checksums:         make(map[uintptr]uint64, oneBucketCapacity),
+		checksums:         make(map[uint32]uint32, oneBucketCapacity),
 	}
 }
 
@@ -301,11 +302,11 @@ func captureChecksumMap(snapshot *ValueSnapshot, value reflect.Value, options Op
 	case reflect.Bool, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
 		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
 		reflect.Float32, reflect.Float64, reflect.Complex64, reflect.Complex128:
-		valueBytes := converValueTypeToBytesSlice(value)
+		valueBytes := convertValueTypeToBytesSlice(value)
 		snapshot = captureRawBytesLevelChecksum(snapshot, valueBytes, valueKind)
 		return snapshot
 	case reflect.Struct:
-		valueBytes := converValueTypeToBytesSlice(value)
+		valueBytes := convertValueTypeToBytesSlice(value)
 		snapshot = captureRawBytesLevelChecksum(snapshot, valueBytes, valueKind)
 		snapshot = perFieldSnapshot(snapshot, value, options)
 		return snapshot
@@ -319,7 +320,7 @@ func captureChecksumMap(snapshot *ValueSnapshot, value reflect.Value, options Op
 		if value.IsNil() || value.IsZero() {
 			return capturePointer(snapshot, valuePointer, valueKind)
 		}
-		snapshot.checksums[evalKey(uintptr(valuePointer), valueKind)] = uint64(value.Len())
+		snapshot.checksums[evalKey(uintptr(valuePointer), valueKind)] = uint32(value.Len())
 		snapshot = perEntrySnapshot(snapshot, value, options)
 		return snapshot
 	case reflect.Invalid:
@@ -328,8 +329,14 @@ func captureChecksumMap(snapshot *ValueSnapshot, value reflect.Value, options Op
 	return snapshot
 }
 
-func evalKey(valuePointer uintptr, kind reflect.Kind) uintptr {
-	return valuePointer ^ uintptr(kind)
+//go:nosplit
+func evalKey32(valuePointer uint32, kind reflect.Kind) uint32 {
+	return valuePointer ^ uint32(kind)
+}
+
+//go:nosplit
+func evalKey(valuePointer uintptr, kind reflect.Kind) uint32 {
+	return uint32(valuePointer) ^ uint32(kind)
 }
 
 func valueIsPrimitive(v reflect.Value) bool {
@@ -389,22 +396,30 @@ func perItemSnapshot(snapshot *ValueSnapshot, value reflect.Value, options Optio
 	return snapshot
 }
 
+//go:nosplit
 func capturePointer(snapshot *ValueSnapshot, valuePointer unsafe.Pointer, valueKind reflect.Kind) *ValueSnapshot {
-	snapshot.checksums[evalKey(uintptr(valuePointer), valueKind)] = uint64(uintptr(valuePointer))
+	snapshot.checksums[evalKey(uintptr(valuePointer), valueKind)] = uint32(uintptr(valuePointer))
 	return snapshot
 }
 
+//go:nosplit
 func captureRawBytesLevelChecksum(
 	snapshot *ValueSnapshot,
 	valueBytes []byte, valueKind reflect.Kind,
 ) *ValueSnapshot {
-	hashSum := xxhash.Sum64(valueBytes)
-	snapshot.checksums[evalKey(uintptr(hashSum), valueKind)] = hashSum
+	var hashSum uint32
+	if len(valueBytes) > 64 {
+		hashSum = crc32.ChecksumIEEE(valueBytes)
+	} else {
+		hashSum = uint32(xxhash.Sum64(valueBytes))
+	}
+	snapshot.checksums[evalKey32(hashSum, valueKind)] = hashSum
 	return snapshot
 }
 
-func converValueTypeToBytesSlice(value reflect.Value) []byte {
-	result := []byte{}
+//go:nosplit
+func convertValueTypeToBytesSlice(value reflect.Value) []byte {
+	var result []byte
 	targetByteSliceHeader := (*reflect.SliceHeader)(unsafe.Pointer(&result))
 
 	valuePointer := pointerOfValue(value)
@@ -416,8 +431,9 @@ func converValueTypeToBytesSlice(value reflect.Value) []byte {
 	return result
 }
 
+//go:nosplit
 func convertSliceBasedTypeToByteSlice(value reflect.Value) []byte {
-	result := []byte{}
+	var result []byte
 	targetByteSliceHeader := (*reflect.SliceHeader)(unsafe.Pointer(&result))
 
 	valuePointer := pointerOfValue(value)
@@ -433,6 +449,7 @@ func convertSliceBasedTypeToByteSlice(value reflect.Value) []byte {
 	return result
 }
 
+//go:nosplit
 func pointerOfValue(value reflect.Value) unsafe.Pointer {
 	//nolint:exhaustive
 	switch value.Kind() {
@@ -450,6 +467,7 @@ func pointerOfValue(value reflect.Value) unsafe.Pointer {
 	panic(fmt.Sprintf("can't get pointer to value. kind: %#v; value: %#v", value.Kind().String(), value))
 }
 
+//go:nosplit
 func fetchDataPointerFromString(value reflect.Value) unsafe.Pointer {
 	stringValue := value.String()
 	return unsafe.Pointer(((*reflect.StringHeader)(unsafe.Pointer(&stringValue))).Data)
@@ -467,7 +485,7 @@ func (m mutationDetectionError) Error() string {
 	return string(m)
 }
 
-func checksumEquals(newChecksum map[uintptr]uint64, originalChecksum map[uintptr]uint64) bool {
+func checksumEquals(newChecksum map[uint32]uint32, originalChecksum map[uint32]uint32) bool {
 	if len(newChecksum) != len(originalChecksum) {
 		return false
 	}
@@ -486,6 +504,7 @@ func checksumEquals(newChecksum map[uintptr]uint64, originalChecksum map[uintptr
 //nolint:gochecknoglobals // taskQueue is global to maximise goroutine pool utilization
 var taskQueue = make(chan func())
 
+//go:nosplit
 func runInPool(task func()) {
 	select {
 	case taskQueue <- task:
