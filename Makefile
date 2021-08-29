@@ -5,10 +5,13 @@ coverage: test
 	go tool cover -html=coverage.out
 
 bench:
-	go test -timeout 3h -count=5 -run=Benchmark -bench=. github.com/goodbadreviewer/immcheck
+	go test -timeout 3h -count=5 -run=xxx -bench=BenchmarkImmcheck ./...
+
+bench_hash:
+	go test -timeout 3h -count=5 -run=xxx -bench=BenchmarkHash ./...
 
 profile: clean
-	go test -run=xxx -bench=BenchmarkImmcheckTransactions github.com/goodbadreviewer/immcheck/... -cpuprofile profile.out
+	go test -run=xxx -bench=BenchmarkImmcheckTransactions ./... -cpuprofile profile.out
 	go tool pprof -http=:8080 profile.out
 
 lint: install-golangci-lint

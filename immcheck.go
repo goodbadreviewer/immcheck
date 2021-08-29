@@ -408,7 +408,9 @@ func captureRawBytesLevelChecksum(
 	valueBytes []byte, valueKind reflect.Kind,
 ) *ValueSnapshot {
 	var hashSum uint32
-	if len(valueBytes) > 64 {
+	biggerSliceThreshold := 64
+	if len(valueBytes) > biggerSliceThreshold {
+		// crc32 measured to be more effective for values bigger than 64 bytes
 		hashSum = crc32.ChecksumIEEE(valueBytes)
 	} else {
 		hashSum = uint32(xxhash.Sum64(valueBytes))

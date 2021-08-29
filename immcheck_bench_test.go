@@ -2,9 +2,11 @@ package immcheck_test
 
 import (
 	"fmt"
+	"hash/crc32"
 	"math/rand"
 	"testing"
 
+	"github.com/cespare/xxhash/v2"
 	"github.com/goodbadreviewer/immcheck"
 )
 
@@ -103,26 +105,26 @@ func BenchmarkImmcheckTransactions(b *testing.B) {
 	}
 }
 
-//func BenchmarkHash(b *testing.B) {
-//	for power := 2; power < 20; power++ {
-//		b.Run(fmt.Sprintf("crc32-%v", 1<<power), func(b *testing.B) {
-//			target := make([]byte, (1<<power)+b.N)
-//			rand.Read(target)
-//			b.ResetTimer()
-//			for i := 0; i < b.N; i++ {
-//				count += int(crc32.ChecksumIEEE(target[i : i+(1<<power)]))
-//			}
-//		})
-//		b.Run(fmt.Sprintf("xxhash-%v", 1<<power), func(b *testing.B) {
-//			target := make([]byte, (1<<power)+b.N)
-//			rand.Read(target)
-//			b.ResetTimer()
-//			for i := 0; i < b.N; i++ {
-//				count += int(xxhash.Sum64(target[i : i+(1<<power)]))
-//			}
-//		})
-//	}
-//}
+func BenchmarkHash(b *testing.B) {
+	for power := 2; power < 20; power++ {
+		b.Run(fmt.Sprintf("crc32-%v", 1<<power), func(b *testing.B) {
+			target := make([]byte, (1<<power)+b.N)
+			rand.Read(target)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				count += int(crc32.ChecksumIEEE(target[i : i+(1<<power)]))
+			}
+		})
+		b.Run(fmt.Sprintf("xxhash-%v", 1<<power), func(b *testing.B) {
+			target := make([]byte, (1<<power)+b.N)
+			rand.Read(target)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				count += int(xxhash.Sum64(target[i : i+(1<<power)]))
+			}
+		})
+	}
+}
 
 func runTransactionsBenchmark(
 	b *testing.B,
