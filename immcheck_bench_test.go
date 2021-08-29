@@ -3,6 +3,7 @@ package immcheck_test
 import (
 	"fmt"
 	"hash/crc32"
+	"hash/maphash"
 	"math/rand"
 	"testing"
 
@@ -106,21 +107,32 @@ func BenchmarkImmcheckTransactions(b *testing.B) {
 }
 
 func BenchmarkHash(b *testing.B) {
-	for power := 2; power < 20; power++ {
-		b.Run(fmt.Sprintf("crc32-%v", 1<<power), func(b *testing.B) {
-			target := make([]byte, (1<<power)+b.N)
+	for s := 4; s < 1024; s *= 2 {
+		b.Run(fmt.Sprintf("crc32-%v", s), func(b *testing.B) {
+			target := make([]byte, s+b.N)
 			rand.Read(target)
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				count += int(crc32.ChecksumIEEE(target[i : i+(1<<power)]))
+				count += int(crc32.ChecksumIEEE(target[i : i+s]))
 			}
 		})
-		b.Run(fmt.Sprintf("xxhash-%v", 1<<power), func(b *testing.B) {
-			target := make([]byte, (1<<power)+b.N)
+		b.Run(fmt.Sprintf("xxhash-%v", s), func(b *testing.B) {
+			target := make([]byte, s+b.N)
 			rand.Read(target)
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				count += int(xxhash.Sum64(target[i : i+(1<<power)]))
+				count += int(xxhash.Sum64(target[i : i+s]))
+			}
+		})
+		b.Run(fmt.Sprintf("maphash-%v", s), func(b *testing.B) {
+			target := make([]byte, s+b.N)
+			rand.Read(target)
+			b.ResetTimer()
+			hash := maphash.Hash{}
+			for i := 0; i < b.N; i++ {
+				hash.Reset()
+				_, _ = hash.Write(target[i : i+s])
+				count += int(hash.Sum64())
 			}
 		})
 	}

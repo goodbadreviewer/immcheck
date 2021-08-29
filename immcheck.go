@@ -3,7 +3,6 @@ package immcheck
 import (
 	"bytes"
 	"fmt"
-	"hash/crc32"
 	"io"
 	"os"
 	"reflect"
@@ -12,8 +11,6 @@ import (
 	"sync"
 	"time"
 	"unsafe"
-
-	"github.com/cespare/xxhash/v2"
 )
 
 const MutationDetectedError mutationDetectionError = "mutation of immutable value detected"
@@ -407,14 +404,7 @@ func captureRawBytesLevelChecksum(
 	snapshot *ValueSnapshot,
 	valueBytes []byte, valueKind reflect.Kind,
 ) *ValueSnapshot {
-	var hashSum uint32
-	biggerSliceThreshold := 64
-	if len(valueBytes) > biggerSliceThreshold {
-		// crc32 measured to be more effective for values bigger than 64 bytes
-		hashSum = crc32.ChecksumIEEE(valueBytes)
-	} else {
-		hashSum = uint32(xxhash.Sum64(valueBytes))
-	}
+	hashSum := hashSum(valueBytes)
 	snapshot.checksums[evalKey32(hashSum, valueKind)] = hashSum
 	return snapshot
 }
