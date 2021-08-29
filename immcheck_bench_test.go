@@ -21,7 +21,7 @@ var countOfTransactions = []int{
 }
 
 var sizeOfTxContext = []int{
-	1024,
+	8, 1024,
 }
 
 var count = 0
@@ -40,7 +40,11 @@ func BenchmarkImmcheckBytes(b *testing.B) {
 					localRand.Read(targetObjects[i])
 				}
 
-				runBytesBenchmark(b, targetObjects, immcheck.ImmutabilityCheckOptions{SkipOriginCapturing: true}, mutationPercent)
+				runBytesBenchmark(
+					b, targetObjects,
+					immcheck.Options{Flags: immcheck.SkipOriginCapturing | immcheck.SkipLoggingOnMutation},
+					mutationPercent,
+				)
 			})
 		}
 	}
@@ -49,7 +53,7 @@ func BenchmarkImmcheckBytes(b *testing.B) {
 func runBytesBenchmark(
 	b *testing.B,
 	targetObjects [][]byte,
-	options immcheck.ImmutabilityCheckOptions,
+	options immcheck.Options,
 	mutationPercent int) {
 	b.Helper()
 	b.ResetTimer()
@@ -90,7 +94,7 @@ func BenchmarkImmcheckTransactions(b *testing.B) {
 
 					runTransactionsBenchmark(
 						b, targetObjects,
-						immcheck.ImmutabilityCheckOptions{SkipOriginCapturing: true},
+						immcheck.Options{Flags: immcheck.SkipOriginCapturing | immcheck.SkipLoggingOnMutation},
 						mutationPercent,
 					)
 				})
@@ -102,7 +106,7 @@ func BenchmarkImmcheckTransactions(b *testing.B) {
 func runTransactionsBenchmark(
 	b *testing.B,
 	targetObjects [][]*Transaction,
-	options immcheck.ImmutabilityCheckOptions,
+	options immcheck.Options,
 	mutationPercent int) {
 	b.ResetTimer()
 	b.ReportAllocs()

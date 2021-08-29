@@ -22,6 +22,10 @@ func() {
     // now when we mutate m, we will get panic at the end of the function
     defer immcheck.EnsureImmutability(&m)()
 
+    // it is also possible to set a finalizer that can check
+    // if object remained immutable from this point till garbage collection
+    immcheck.CheckImmutabilityOnFinalization(&m)
+
     delete(m, "k1")
 }()
 ```
