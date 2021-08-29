@@ -3,10 +3,13 @@ package immcheck
 import (
 	"bytes"
 	"fmt"
+	"io"
+	"os"
 	"reflect"
 	"runtime"
 	"strconv"
 	"sync"
+	"time"
 	"unsafe"
 
 	"github.com/cespare/xxhash/v2"
@@ -16,14 +19,30 @@ const MutationDetectedError mutationDetectionError = "mutation of immutable valu
 const InvalidSnapshotStateError mutationDetectionError = "invalid snapshot state"
 const UnsupportedTypeError mutationDetectionError = "unsupported type for immutability check"
 
-// ImmutabilityCheckOptions configures check.
-type ImmutabilityCheckOptions struct {
-	// By default, immcheck captures caller information to report snapshot origin.
-	// But you can skip it to get a tiny bit more performance.
-	SkipOriginCapturing bool
-	// By default, immcheck doesn't allow reflect.UnsafePointer, reflect.Func and reflect.Chan
-	// inside target value, but you can override this.
-	AllowInherentlyUnsafeTypes bool
+type immutabilityCheckFlag uint8
+
+const (
+	// SkipOriginCapturing forces immcheck to not capture caller information to report snapshot origin.
+	// This option gives a tiny bit more performance.
+	SkipOriginCapturing immutabilityCheckFlag = 1 << iota
+	// AllowInherentlyUnsafeTypes forces immcheck to allow reflect.UnsafePointer, reflect.Func and reflect.Chan
+	// inside target value.
+	AllowInherentlyUnsafeTypes
+	// SkipPanicOnDetectedMutation forces immcheck to not panic in
+	// immcheck.EnsureImmutability and immcheck.CheckImmutabilityOnFinalization methods when mutation is detected.
+	SkipPanicOnDetectedMutation
+	// SkipLoggingOnMutation forces immcheck to not log details of found mutation
+	// in immcheck.EnsureImmutability and immcheck.CheckImmutabilityOnFinalization methods.
+	SkipLoggingOnMutation
+)
+
+// Options configures immutability check.
+type Options struct {
+	// Specifies logger output stream. Can be nil. immcheck uses os.Stderr by default.
+	LogWriter io.Writer
+	// Bitmask of ImmutabilityCheckFlags.
+	// You can specify it like that: SkipOriginCapturing | SkipLoggingOnMutation | AllowInherentlyUnsafeTypes
+	Flags immutabilityCheckFlag
 }
 
 // ValueSnapshot is a re-usable object of snapshot value that works similar to bytes.Buffer.
@@ -107,15 +126,15 @@ func (v *ValueSnapshot) CheckImmutabilityAgainst(otherSnapshot *ValueSnapshot) e
 // Returns modified dst object.
 func CaptureSnapshot(v interface{}, dst *ValueSnapshot) *ValueSnapshot {
 	skipTwoFrames := 2
-	snapshot := initValueSnapshot(dst, ImmutabilityCheckOptions{}, skipTwoFrames)
+	snapshot := initValueSnapshot(dst, Options{}, skipTwoFrames)
 	targetValue := reflect.ValueOf(v)
-	snapshot = captureChecksumMap(snapshot, targetValue, ImmutabilityCheckOptions{})
+	snapshot = captureChecksumMap(snapshot, targetValue, Options{})
 	return snapshot
 }
 
 // CaptureSnapshotWithOptions creates lightweight checksum according to settings specified in options,
 // representation of v and stores if into dst. Returns modified dst object.
-func CaptureSnapshotWithOptions(v interface{}, dst *ValueSnapshot, options ImmutabilityCheckOptions) *ValueSnapshot {
+func CaptureSnapshotWithOptions(v interface{}, dst *ValueSnapshot, options Options) *ValueSnapshot {
 	skipTwoFrames := 2
 	snapshot := initValueSnapshot(dst, options, skipTwoFrames)
 	targetValue := reflect.ValueOf(v)
@@ -127,15 +146,32 @@ func CaptureSnapshotWithOptions(v interface{}, dst *ValueSnapshot, options Immut
 // Returned function can be called multiple times.
 // If mutation is detected returned function will panic.
 func EnsureImmutability(v interface{}) func() {
-	return ensureImmutability(v, ImmutabilityCheckOptions{})
+	return ensureImmutability(v, Options{})
 }
 
 // EnsureImmutabilityWithOptions captures checksum of v according to settings specified in options
 // and returns function that can be called to verify that v was not mutated.
 // Returned function can be called multiple times.
 // If mutation is detected returned function will panic.
-func EnsureImmutabilityWithOptions(v interface{}, options ImmutabilityCheckOptions) func() {
+func EnsureImmutabilityWithOptions(v interface{}, options Options) func() {
 	return ensureImmutability(v, options)
+}
+
+// CheckImmutabilityOnFinalization captures checksum of v and sets finalizer on v
+// to check if it was mutated during its lifetime.
+// If mutation is detected finalizer will log details and panic which will stop the process.
+// If you don't want to exit on detected mutation use
+// immcheck.CheckImmutabilityOnFinalizationWithOptions and override default flags.
+func CheckImmutabilityOnFinalization(v interface{}) {
+	checkImmutabilityOnFinalization(v, Options{})
+}
+
+// CheckImmutabilityOnFinalizationWithOptions captures checksum of v and sets finalizer on v
+// to check if it was mutated during its lifetime.
+// If mutation is detected finalizer will log details and panic which will stop the process.
+// If you don't want to exit on detected mutation override default flags.
+func CheckImmutabilityOnFinalizationWithOptions(v interface{}, options Options) {
+	checkImmutabilityOnFinalization(v, options)
 }
 
 //nolint:gochecknoglobals // tempSnapshotsPool is global to maximise snapshot objects re-use
@@ -145,11 +181,37 @@ var tempSnapshotsPool = &sync.Pool{
 	},
 }
 
-func ensureImmutability(v interface{}, options ImmutabilityCheckOptions) func() {
+func checkImmutabilityOnFinalization(v interface{}, options Options) {
 	if v == nil {
 		panic(fmt.Errorf("%w. target value can't be nil", UnsupportedTypeError))
 	}
-	originalSnapshot := tempSnapshotsPool.Get().(*ValueSnapshot) // this snapshot will be returned to pool in a callback
+	originalSnapshot := tempSnapshotsPool.Get().(*ValueSnapshot) // finalizer returns this snapshot to the pool
+	skipThreeFrames := 3
+	originalSnapshot = initValueSnapshot(originalSnapshot, options, skipThreeFrames)
+	originalSnapshot = captureChecksumMap(originalSnapshot, reflect.ValueOf(v), options)
+
+	runtime.SetFinalizer(v, func(v interface{}) {
+		runInPool(func() {
+			newSnapshot := tempSnapshotsPool.Get().(*ValueSnapshot)
+			defer tempSnapshotsPool.Put(newSnapshot)
+			defer tempSnapshotsPool.Put(originalSnapshot)
+
+			funcWillBeInvokedByAsyncPoolSoSkipOneFrame := 1
+			newSnapshot = initValueSnapshot(newSnapshot, options, funcWillBeInvokedByAsyncPoolSoSkipOneFrame)
+			newSnapshot = captureChecksumMap(newSnapshot, reflect.ValueOf(v), options)
+			checkErr := originalSnapshot.CheckImmutabilityAgainst(newSnapshot)
+			if checkErr != nil {
+				reportError(v, checkErr, options)
+			}
+		})
+	})
+}
+
+func ensureImmutability(v interface{}, options Options) func() {
+	if v == nil {
+		panic(fmt.Errorf("%w. target value can't be nil", UnsupportedTypeError))
+	}
+	originalSnapshot := tempSnapshotsPool.Get().(*ValueSnapshot) // callback returns this snapshot to the pool
 	skipThreeFrames := 3
 	originalSnapshot = initValueSnapshot(originalSnapshot, options, skipThreeFrames)
 	targetValue := reflect.ValueOf(v)
@@ -165,8 +227,25 @@ func ensureImmutability(v interface{}, options ImmutabilityCheckOptions) func() 
 		newSnapshot = captureChecksumMap(newSnapshot, targetValue, options)
 		checkErr := originalSnapshot.CheckImmutabilityAgainst(newSnapshot)
 		if checkErr != nil {
-			panic(checkErr)
+			reportError(v, checkErr, options)
 		}
+	}
+}
+
+func reportError(v interface{}, checkErr error, options Options) {
+	if options.Flags&SkipLoggingOnMutation == 0 {
+		var logDestination io.Writer = os.Stderr
+		if options.LogWriter != nil {
+			logDestination = options.LogWriter
+		}
+		_, _ = fmt.Fprintf(
+			logDestination,
+			"[ERROR] runtime mutation detected. value: `%#v`; error: %v\n",
+			v, checkErr,
+		)
+	}
+	if options.Flags&SkipPanicOnDetectedMutation == 0 {
+		panic(checkErr)
 	}
 }
 
@@ -181,9 +260,9 @@ func newValueSnapshot() *ValueSnapshot {
 
 func initValueSnapshot(
 	dst *ValueSnapshot,
-	options ImmutabilityCheckOptions, framesToSkip int) *ValueSnapshot {
+	options Options, framesToSkip int) *ValueSnapshot {
 	dst.Reset()
-	if !options.SkipOriginCapturing {
+	if options.Flags&SkipOriginCapturing == 0 {
 		skipCallerFramesAndShowOnlyUsersCode := framesToSkip
 		_, file, line, ok := runtime.Caller(skipCallerFramesAndShowOnlyUsersCode)
 		if !ok {
@@ -195,15 +274,15 @@ func initValueSnapshot(
 	return dst
 }
 
-func captureChecksumMap(snapshot *ValueSnapshot, value reflect.Value, options ImmutabilityCheckOptions) *ValueSnapshot {
+func captureChecksumMap(snapshot *ValueSnapshot, value reflect.Value, options Options) *ValueSnapshot {
 	valueKind := value.Kind()
 	switch valueKind {
 	case reflect.UnsafePointer, reflect.Func, reflect.Chan:
-		if !options.AllowInherentlyUnsafeTypes {
+		if options.Flags&AllowInherentlyUnsafeTypes == 0 {
 			panic(fmt.Errorf("%w. UnsafePointer, Func, and Chan types are not supported, "+
 				"since there is no way for us to fully verify immutability for these types. "+
 				"If you still want to proceed and ignore fields of such type "+
-				"use ImmutabilityCheckOptions.AllowInherentlyUnsafeTypes option. "+
+				"use Flags.AllowInherentlyUnsafeTypes option. "+
 				"Unsupported type kind: %v", UnsupportedTypeError, valueKind.String()))
 		}
 		return capturePointer(snapshot, unsafe.Pointer(value.Pointer()), valueKind)
@@ -275,7 +354,7 @@ func valueIsPrimitive(v reflect.Value) bool {
 	return false
 }
 
-func perEntrySnapshot(snapshot *ValueSnapshot, value reflect.Value, options ImmutabilityCheckOptions) *ValueSnapshot {
+func perEntrySnapshot(snapshot *ValueSnapshot, value reflect.Value, options Options) *ValueSnapshot {
 	mapRange := value.MapRange()
 	for mapRange.Next() {
 		k := mapRange.Key()
@@ -286,7 +365,7 @@ func perEntrySnapshot(snapshot *ValueSnapshot, value reflect.Value, options Immu
 	return snapshot
 }
 
-func perFieldSnapshot(snapshot *ValueSnapshot, value reflect.Value, options ImmutabilityCheckOptions) *ValueSnapshot {
+func perFieldSnapshot(snapshot *ValueSnapshot, value reflect.Value, options Options) *ValueSnapshot {
 	if valueIsPrimitive(value) {
 		return snapshot
 	}
@@ -299,7 +378,7 @@ func perFieldSnapshot(snapshot *ValueSnapshot, value reflect.Value, options Immu
 	return snapshot
 }
 
-func perItemSnapshot(snapshot *ValueSnapshot, value reflect.Value, options ImmutabilityCheckOptions) *ValueSnapshot {
+func perItemSnapshot(snapshot *ValueSnapshot, value reflect.Value, options Options) *ValueSnapshot {
 	iterableLen := value.Len()
 	if iterableLen == 0 || valueIsPrimitive(value.Index(0)) {
 		return snapshot
@@ -402,4 +481,33 @@ func checksumEquals(newChecksum map[uintptr]uint64, originalChecksum map[uintptr
 		}
 	}
 	return true
+}
+
+//nolint:gochecknoglobals // taskQueue is global to maximise goroutine pool utilization
+var taskQueue = make(chan func())
+
+func runInPool(task func()) {
+	select {
+	case taskQueue <- task:
+		// submitted, everything is ok
+	default:
+		go func() {
+			// do the given task
+			task()
+
+			const cleanupDuration = 10 * time.Second
+			cleanupTicker := time.NewTicker(cleanupDuration)
+			defer cleanupTicker.Stop()
+
+			for {
+				select {
+				case t := <-taskQueue:
+					t()
+					cleanupTicker.Reset(cleanupDuration)
+				case <-cleanupTicker.C:
+					return
+				}
+			}
+		}()
+	}
 }
