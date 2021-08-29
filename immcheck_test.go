@@ -1,10 +1,14 @@
 package immcheck_test
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 	"unsafe"
 
 	"github.com/goodbadreviewer/immcheck"
@@ -29,8 +33,57 @@ func TestExample(t *testing.T) {
 		// now when we mutate m, we will get panic at the end of the function
 		defer immcheck.EnsureImmutability(&m)()
 
+		// it is also possible to set a finalizer that can check
+		// if object remained immutable from this point till garbage collection,
+		// but it will fail this demonstration
+		// immcheck.CheckImmutabilityOnFinalization(&m)
+
 		delete(m, "k1")
 	}()
+}
+
+func TestCheckImmutabilityWithOptionsOnFinalization(t *testing.T) {
+	t.Parallel()
+	{
+		m := map[string]string{
+			"k1": "v1",
+		}
+		logBuffer := &lockedWriterBuffer{buf: &bytes.Buffer{}}
+		immcheck.CheckImmutabilityOnFinalizationWithOptions(&m, immcheck.Options{
+			Flags:     immcheck.SkipPanicOnDetectedMutation,
+			LogWriter: logBuffer,
+		})
+		m["j1"] = "b1"
+
+		runtime.GC()
+		time.Sleep(10 * time.Millisecond)
+		resultingLog := logBuffer.String()
+		t.Log(resultingLog)
+		logAsExpected := strings.Contains(
+			resultingLog,
+			"[ERROR] runtime mutation detected. value: `&map[string]string{\"j1\":\"b1\", \"k1\":\"v1\"}`; "+
+				"error: mutation of immutable value detected\nimmutable snapshot was captured here ",
+		)
+		if !logAsExpected {
+			t.Fatalf("unnexpected log on finalization: `%v`", resultingLog)
+		}
+	}
+	{
+		m := map[string]string{
+			"k1": "v1",
+		}
+		logBuffer := &lockedWriterBuffer{buf: &bytes.Buffer{}}
+		immcheck.CheckImmutabilityOnFinalizationWithOptions(&m, immcheck.Options{
+			Flags:     immcheck.SkipPanicOnDetectedMutation,
+			LogWriter: logBuffer,
+		})
+		runtime.GC()
+		time.Sleep(10 * time.Millisecond)
+		resultingLog := logBuffer.String()
+		if logBuffer.String() != "" {
+			t.Fatalf("unnexpected log on finalization: %v", resultingLog)
+		}
+	}
 }
 
 func TestSimpleCounter(t *testing.T) {
@@ -83,7 +136,7 @@ func TestSimpleCounterManualCheck(t *testing.T) {
 		uintCounter = 74574
 		otherSnapshot := immcheck.CaptureSnapshotWithOptions(
 			&uintCounter, immcheck.NewValueSnapshot(),
-			immcheck.ImmutabilityCheckOptions{},
+			immcheck.Options{},
 		)
 		err := snapshot.CheckImmutabilityAgainst(otherSnapshot)
 		if err == nil {
@@ -100,12 +153,12 @@ func TestSimpleCounterWithOptions(t *testing.T) {
 	t.Parallel()
 	uintCounter := uint64(35)
 	uintCounter++
-	immcheck.EnsureImmutabilityWithOptions(&uintCounter, immcheck.ImmutabilityCheckOptions{
-		SkipOriginCapturing: true,
+	immcheck.EnsureImmutabilityWithOptions(&uintCounter, immcheck.Options{
+		Flags: immcheck.SkipOriginCapturing | immcheck.SkipLoggingOnMutation | immcheck.SkipPanicOnDetectedMutation,
 	})() // check that no mutation is fine
 	panicMessage := expectMutationPanic(t, func() {
-		defer immcheck.EnsureImmutabilityWithOptions(&uintCounter, immcheck.ImmutabilityCheckOptions{
-			SkipOriginCapturing: true,
+		defer immcheck.EnsureImmutabilityWithOptions(&uintCounter, immcheck.Options{
+			Flags: immcheck.SkipOriginCapturing,
 		})()
 		uintCounter = 74574
 	})
@@ -373,7 +426,7 @@ func TestRecursiveInterfaceBasedLinkedList(t *testing.T) {
 
 func TestUnsafePointer(t *testing.T) {
 	t.Parallel()
-	allowUnsafe := immcheck.ImmutabilityCheckOptions{AllowInherentlyUnsafeTypes: true}
+	allowUnsafe := immcheck.Options{Flags: immcheck.AllowInherentlyUnsafeTypes}
 	type person struct {
 		age uint16
 		ptr unsafe.Pointer
@@ -407,7 +460,7 @@ func TestUnsafePointer(t *testing.T) {
 
 func TestFunction(t *testing.T) {
 	t.Parallel()
-	allowUnsafe := immcheck.ImmutabilityCheckOptions{AllowInherentlyUnsafeTypes: true}
+	allowUnsafe := immcheck.Options{Flags: immcheck.AllowInherentlyUnsafeTypes}
 	type person struct {
 		age uint16
 		f   func()
@@ -434,7 +487,7 @@ func TestFunction(t *testing.T) {
 
 func TestChannel(t *testing.T) {
 	t.Parallel()
-	allowUnsafe := immcheck.ImmutabilityCheckOptions{AllowInherentlyUnsafeTypes: true}
+	allowUnsafe := immcheck.Options{Flags: immcheck.AllowInherentlyUnsafeTypes}
 	type person struct {
 		age uint16
 		ch  chan int
@@ -515,7 +568,7 @@ func TestPointerToSubslice(t *testing.T) {
 
 func TestMap(t *testing.T) {
 	t.Parallel()
-	allowUnsafe := immcheck.ImmutabilityCheckOptions{AllowInherentlyUnsafeTypes: true}
+	allowUnsafe := immcheck.Options{Flags: immcheck.AllowInherentlyUnsafeTypes}
 	type person struct {
 		age    uint16
 		height uint8
@@ -566,7 +619,7 @@ func checkUnsupportedTypeMessage(t *testing.T, panicMessage string, expectedType
 			"UnsafePointer, Func, and Chan types are not supported, "+
 			"since there is no way for us to fully verify immutability for these types. "+
 			"If you still want to proceed and ignore fields of such type "+
-			"use ImmutabilityCheckOptions.AllowInherentlyUnsafeTypes option. Unsupported type kind: ",
+			"use Flags.AllowInherentlyUnsafeTypes option. Unsupported type kind: ",
 	)
 	sufixIsCorrect := strings.HasSuffix(panicMessage, expectedTypeStringInErrorMessage)
 	t.Log(panicMessage)
@@ -601,4 +654,21 @@ func expectPanic(t *testing.T, f func(), expectedError error) string {
 		t.Fatal("panic isn't detected")
 	}
 	return actualPanic.(error).Error()
+}
+
+type lockedWriterBuffer struct {
+	m   sync.Mutex
+	buf *bytes.Buffer
+}
+
+func (l *lockedWriterBuffer) String() string {
+	l.m.Lock()
+	defer l.m.Unlock()
+	return l.buf.String()
+}
+
+func (l *lockedWriterBuffer) Write(p []byte) (n int, err error) {
+	l.m.Lock()
+	defer l.m.Unlock()
+	return l.buf.Write(p)
 }

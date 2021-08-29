@@ -1,2 +1,4 @@
 *.iml
 .idea
+coverage.out
+profile.out
