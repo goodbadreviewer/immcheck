@@ -1,6 +1,9 @@
 test: clean
 	go test -race -covermode atomic -coverprofile coverage.out ./...
 
+coverage: test
+	go tool cover -html=coverage.out
+
 bench:
 	go test -timeout 3h -count=5 -run=Benchmark -bench=. github.com/goodbadreviewer/immcheck
 

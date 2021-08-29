@@ -100,11 +100,21 @@ func TestSimpleCounter(t *testing.T) {
 
 func TestNilTargetValue(t *testing.T) {
 	t.Parallel()
-	panicMessage := expectPanic(t, func() {
-		immcheck.EnsureImmutability(nil)()
-	}, immcheck.UnsupportedTypeError)
-	if !strings.Contains(panicMessage, "target value can't be nil") {
-		t.Fatal("wrong error message")
+	{
+		panicMessage := expectPanic(t, func() {
+			immcheck.EnsureImmutability(nil)()
+		}, immcheck.UnsupportedTypeError)
+		if !strings.Contains(panicMessage, "target value can't be nil") {
+			t.Fatal("wrong error message")
+		}
+	}
+	{
+		panicMessage := expectPanic(t, func() {
+			immcheck.CheckImmutabilityOnFinalization(nil)
+		}, immcheck.UnsupportedTypeError)
+		if !strings.Contains(panicMessage, "target value can't be nil") {
+			t.Fatal("wrong error message")
+		}
 	}
 }
 
