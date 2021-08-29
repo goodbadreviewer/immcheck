@@ -1,0 +1,36 @@
+goos: darwin
+goarch: amd64
+pkg: github.com/goodbadreviewer/immcheck
+cpu: Intel(R) Core(TM) i7-10700K CPU @ 3.80GHz
+BenchmarkImmcheckBytes/[16384]byte;muts(0%)-16         	  587248	      2196 ns/op	         0 muts	      24 B/op	       1 allocs/op
+BenchmarkImmcheckBytes/[16384]byte;muts(0%)-16         	  618012	      1929 ns/op	         0 muts	      24 B/op	       1 allocs/op
+BenchmarkImmcheckBytes/[16384]byte;muts(0%)-16         	  619663	      1907 ns/op	         0 muts	      24 B/op	       1 allocs/op
+BenchmarkImmcheckBytes/[16384]byte;muts(0%)-16         	  616948	      1889 ns/op	         0 muts	      24 B/op	       1 allocs/op
+BenchmarkImmcheckBytes/[16384]byte;muts(0%)-16         	  621354	      1872 ns/op	         0 muts	      24 B/op	       1 allocs/op
+BenchmarkImmcheckBytes/[16384]byte;muts(1%)-16         	  617198	      1887 ns/op	      6233 muts	      24 B/op	       1 allocs/op
+BenchmarkImmcheckBytes/[16384]byte;muts(1%)-16         	  625503	      1871 ns/op	      6271 muts	      24 B/op	       1 allocs/op
+BenchmarkImmcheckBytes/[16384]byte;muts(1%)-16         	  614892	      1895 ns/op	      6284 muts	      24 B/op	       1 allocs/op
+BenchmarkImmcheckBytes/[16384]byte;muts(1%)-16         	  615037	      1872 ns/op	      6192 muts	      24 B/op	       1 allocs/op
+BenchmarkImmcheckBytes/[16384]byte;muts(1%)-16         	  625844	      1880 ns/op	      6167 muts	      24 B/op	       1 allocs/op
+BenchmarkImmcheckTransactions/[8]txs(8);muts(0%)-16    	   15901	     75630 ns/op	         0 muts	    3115 B/op	      98 allocs/op
+BenchmarkImmcheckTransactions/[8]txs(8);muts(0%)-16    	   15940	     75625 ns/op	         0 muts	    3115 B/op	      98 allocs/op
+BenchmarkImmcheckTransactions/[8]txs(8);muts(0%)-16    	   15895	     75147 ns/op	         0 muts	    3115 B/op	      98 allocs/op
+BenchmarkImmcheckTransactions/[8]txs(8);muts(0%)-16    	   15927	     75211 ns/op	         0 muts	    3115 B/op	      98 allocs/op
+BenchmarkImmcheckTransactions/[8]txs(8);muts(0%)-16    	   15898	     75368 ns/op	         0 muts	    3115 B/op	      98 allocs/op
+BenchmarkImmcheckTransactions/[8]txs(8);muts(1%)-16    	   15744	     75579 ns/op	       146.0 muts	    3116 B/op	      98 allocs/op
+BenchmarkImmcheckTransactions/[8]txs(8);muts(1%)-16    	   15878	     75931 ns/op	       171.0 muts	    3116 B/op	      98 allocs/op
+BenchmarkImmcheckTransactions/[8]txs(8);muts(1%)-16    	   15794	     75246 ns/op	       175.0 muts	    3116 B/op	      98 allocs/op
+BenchmarkImmcheckTransactions/[8]txs(8);muts(1%)-16    	   15739	     75661 ns/op	       160.0 muts	    3116 B/op	      98 allocs/op
+BenchmarkImmcheckTransactions/[8]txs(8);muts(1%)-16    	   15961	     76376 ns/op	       180.0 muts	    3116 B/op	      98 allocs/op
+BenchmarkImmcheckTransactions/[8]txs(1024);muts(0%)-16 	     244	   4944824 ns/op	         0 muts	    8335 B/op	     114 allocs/op
+BenchmarkImmcheckTransactions/[8]txs(1024);muts(0%)-16 	     244	   4949224 ns/op	         0 muts	    8325 B/op	     114 allocs/op
+BenchmarkImmcheckTransactions/[8]txs(1024);muts(0%)-16 	     244	   4948292 ns/op	         0 muts	    8323 B/op	     114 allocs/op
+BenchmarkImmcheckTransactions/[8]txs(1024);muts(0%)-16 	     243	   4954025 ns/op	         0 muts	    8334 B/op	     113 allocs/op
+BenchmarkImmcheckTransactions/[8]txs(1024);muts(0%)-16 	     246	   5097054 ns/op	         0 muts	    8304 B/op	     114 allocs/op
+BenchmarkImmcheckTransactions/[8]txs(1024);muts(1%)-16 	     242	   4935722 ns/op	         1.000 muts	    8369 B/op	     114 allocs/op
+BenchmarkImmcheckTransactions/[8]txs(1024);muts(1%)-16 	     242	   4924011 ns/op	         4.000 muts	    8369 B/op	     114 allocs/op
+BenchmarkImmcheckTransactions/[8]txs(1024);muts(1%)-16 	     241	   4967891 ns/op	         0 muts	    8366 B/op	     114 allocs/op
+BenchmarkImmcheckTransactions/[8]txs(1024);muts(1%)-16 	     240	   4946221 ns/op	         3.000 muts	    8385 B/op	     114 allocs/op
+BenchmarkImmcheckTransactions/[8]txs(1024);muts(1%)-16 	     246	   4929493 ns/op	         3.000 muts	    8318 B/op	     114 allocs/op
+PASS
+ok  	github.com/goodbadreviewer/immcheck	217.904s

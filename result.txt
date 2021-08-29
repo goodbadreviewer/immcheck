@@ -1,0 +1,31 @@
+name                                           old time/op    new time/op    delta
+ImmcheckBytes/[16384]byte;muts(0%)-16            2.40µs ± 1%    1.96µs ±12%  -18.48%  (p=0.016 n=4+5)
+ImmcheckBytes/[16384]byte;muts(1%)-16            2.41µs ± 1%    1.88µs ± 1%  -21.92%  (p=0.008 n=5+5)
+ImmcheckTransactions/[8]txs(8);muts(0%)-16       77.8µs ± 1%    75.4µs ± 0%   -3.03%  (p=0.008 n=5+5)
+ImmcheckTransactions/[8]txs(8);muts(1%)-16       77.2µs ± 0%    75.8µs ± 1%   -1.81%  (p=0.008 n=5+5)
+ImmcheckTransactions/[8]txs(1024);muts(0%)-16    5.31ms ± 3%    4.95ms ± 0%   -6.76%  (p=0.016 n=5+4)
+ImmcheckTransactions/[8]txs(1024);muts(1%)-16    5.28ms ± 2%    4.94ms ± 1%   -6.37%  (p=0.008 n=5+5)
+
+name                                           old muts       new muts       delta
+ImmcheckBytes/[16384]byte;muts(0%)-16              0.00           0.00          ~     (all equal)
+ImmcheckBytes/[16384]byte;muts(1%)-16             4.97k ± 1%     6.23k ± 1%  +25.32%  (p=0.008 n=5+5)
+ImmcheckTransactions/[8]txs(8);muts(0%)-16         0.00           0.00          ~     (all equal)
+ImmcheckTransactions/[8]txs(8);muts(1%)-16          152 ±12%       166 ±12%     ~     (p=0.095 n=5+5)
+ImmcheckTransactions/[8]txs(1024);muts(0%)-16      0.00           0.00          ~     (all equal)
+ImmcheckTransactions/[8]txs(1024);muts(1%)-16     3.20 ±100%     2.20 ±100%     ~     (p=0.468 n=5+5)
+
+name                                           old alloc/op   new alloc/op   delta
+ImmcheckBytes/[16384]byte;muts(0%)-16             24.0B ± 0%     24.0B ± 0%     ~     (all equal)
+ImmcheckBytes/[16384]byte;muts(1%)-16             24.0B ± 0%     24.0B ± 0%     ~     (all equal)
+ImmcheckTransactions/[8]txs(8);muts(0%)-16       3.12kB ± 0%    3.12kB ± 0%   -0.04%  (p=0.008 n=5+5)
+ImmcheckTransactions/[8]txs(8);muts(1%)-16       3.12kB ± 0%    3.12kB ± 0%     ~     (p=0.079 n=4+5)
+ImmcheckTransactions/[8]txs(1024);muts(0%)-16    11.2kB ± 0%     8.3kB ± 0%  -25.88%  (p=0.008 n=5+5)
+ImmcheckTransactions/[8]txs(1024);muts(1%)-16    11.2kB ± 1%     8.4kB ± 1%  -25.61%  (p=0.008 n=5+5)
+
+name                                           old allocs/op  new allocs/op  delta
+ImmcheckBytes/[16384]byte;muts(0%)-16              1.00 ± 0%      1.00 ± 0%     ~     (all equal)
+ImmcheckBytes/[16384]byte;muts(1%)-16              1.00 ± 0%      1.00 ± 0%     ~     (all equal)
+ImmcheckTransactions/[8]txs(8);muts(0%)-16         98.0 ± 0%      98.0 ± 0%     ~     (all equal)
+ImmcheckTransactions/[8]txs(8);muts(1%)-16         98.0 ± 0%      98.0 ± 0%     ~     (all equal)
+ImmcheckTransactions/[8]txs(1024);muts(0%)-16       114 ± 0%       114 ± 0%     ~     (all equal)
+ImmcheckTransactions/[8]txs(1024);muts(1%)-16       114 ± 0%       114 ± 0%     ~     (all equal)

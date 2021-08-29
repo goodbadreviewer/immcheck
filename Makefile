@@ -14,6 +14,9 @@ profile: clean
 lint: install-golangci-lint
 	golangci-lint run
 
+debug_inline:
+	go build -gcflags='-m -d=ssa/check_bce/debug=1' ./immcheck.go
+
 clean:
 	@go clean
 	@rm -f profile.out
