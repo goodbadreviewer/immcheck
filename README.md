@@ -36,3 +36,12 @@ func() {
 }()
 ```
 
+### Brief description of how it works internally and how it affects the performance of your program
+
+The library uses reflection to walk the tree of all reachable pointers, starting from the pointer you provided, and stores checksums of every encountered value into a `map[uint32]uint32`. When it is time to check immutability, it walks the same structure, collects the same map of checksums, and verifies that new map is equal to the previous one. From the performance standpoint of view, the library does a lot of tricks and optimizations to make the overhead as low as possible.
+For example:
+ - it uses memory pooling for these maps of checksums and some internal buffers
+ - it avoids allocations everywhere where possible, though some reflection API calls require allocations (with 1.18 we will be able to get rid of those that remain right now)
+ - it treats slices of pointerless structures as just one contiguous value, so it hashes such slices efficiently and uses only one item in the checksums map to store its hash
+
+In general, performance overhead will depend on what kind of structures you're declaring as immutable and how deeply nested they are. I think for most applications, the overhead should be non-noticeable or at least bearable. If performance is a concern though: you can use "RaceEnsureImmutability" methods that will have 0 overhead in normal builds and will perform checks only when race detector is enabled or if you build your program with `-tags immcheck` build flag
