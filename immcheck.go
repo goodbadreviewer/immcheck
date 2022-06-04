@@ -331,12 +331,10 @@ func captureChecksumMap(snapshot *ValueSnapshot, value reflect.Value, options Op
 	return snapshot
 }
 
-//go:nosplit
 func evalKey32(valuePointer uint32, kind reflect.Kind) uint32 {
 	return valuePointer ^ uint32(kind)
 }
 
-//go:nosplit
 func evalKey(valuePointer uintptr, kind reflect.Kind) uint32 {
 	return uint32(valuePointer) ^ uint32(kind)
 }
@@ -405,13 +403,11 @@ func perItemSnapshot(snapshot *ValueSnapshot, value reflect.Value, options Optio
 	return snapshot
 }
 
-//go:nosplit
 func capturePointer(snapshot *ValueSnapshot, valuePointer unsafe.Pointer, valueKind reflect.Kind) *ValueSnapshot {
 	snapshot.checksums[evalKey(uintptr(valuePointer), valueKind)] = uint32(uintptr(valuePointer))
 	return snapshot
 }
 
-//go:nosplit
 func captureRawBytesLevelChecksum(
 	snapshot *ValueSnapshot,
 	valueBytes []byte, valueKind reflect.Kind,
@@ -421,7 +417,6 @@ func captureRawBytesLevelChecksum(
 	return snapshot
 }
 
-//go:nosplit
 func convertValueTypeToBytesSlice(value reflect.Value) []byte {
 	var result []byte
 	targetByteSliceHeader := (*reflect.SliceHeader)(unsafe.Pointer(&result))
@@ -435,7 +430,6 @@ func convertValueTypeToBytesSlice(value reflect.Value) []byte {
 	return result
 }
 
-//go:nosplit
 func convertSliceBasedTypeToByteSlice(value reflect.Value) []byte {
 	var result []byte
 	targetByteSliceHeader := (*reflect.SliceHeader)(unsafe.Pointer(&result))
@@ -453,7 +447,6 @@ func convertSliceBasedTypeToByteSlice(value reflect.Value) []byte {
 	return result
 }
 
-//go:nosplit
 func pointerOfValue(value reflect.Value) unsafe.Pointer {
 	//nolint:exhaustive
 	switch value.Kind() {
@@ -471,7 +464,6 @@ func pointerOfValue(value reflect.Value) unsafe.Pointer {
 	panic(fmt.Sprintf("can't get pointer to value. kind: %#v; value: %#v", value.Kind().String(), value))
 }
 
-//go:nosplit
 func fetchDataPointerFromString(value reflect.Value) unsafe.Pointer {
 	stringValue := value.String()
 	return unsafe.Pointer(((*reflect.StringHeader)(unsafe.Pointer(&stringValue))).Data)
@@ -508,7 +500,6 @@ func checksumEquals(newChecksum map[uint32]uint32, originalChecksum map[uint32]u
 //nolint:gochecknoglobals // taskQueue is global to maximise goroutine pool utilization
 var taskQueue = make(chan func())
 
-//go:nosplit
 func runInPool(task func()) {
 	select {
 	case taskQueue <- task:

@@ -29,6 +29,10 @@ profile: clean
 	go test -run=xxx -bench=BenchmarkImmcheckTransactions ./... -cpuprofile profile.out
 	go tool pprof -http=:8080 profile.out
 
+profile_mem: clean
+	go test -run=xxx -bench=BenchmarkImmcheckTransactions ./... -memprofile profile.out
+	go tool pprof -http=:8080 profile.out
+
 debug_inline:
 	go build -gcflags='-m -d=ssa/check_bce/debug=1' ./immcheck.go
 
