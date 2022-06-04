@@ -363,11 +363,18 @@ func valueIsPrimitive(v reflect.Value) bool {
 	return false
 }
 
+var mapiterPool = &sync.Pool{New: func() interface{} { return &reflect.MapIter{} }}
+
 func perEntrySnapshot(snapshot *ValueSnapshot, value reflect.Value, options Options) *ValueSnapshot {
-	mapRange := value.MapRange()
-	for mapRange.Next() {
-		k := mapRange.Key()
-		v := mapRange.Value()
+	iterator := mapiterPool.Get().(*reflect.MapIter)
+	defer func() {
+		iterator.Reset(reflect.Value{})
+		mapiterPool.Put(iterator)
+	}()
+	iterator.Reset(value)
+	for iterator.Next() {
+		k := iterator.Key()
+		v := iterator.Value()
 		snapshot = captureChecksumMap(snapshot, k, options)
 		snapshot = captureChecksumMap(snapshot, v, options)
 	}
