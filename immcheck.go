@@ -11,11 +11,15 @@ import (
 	"sync"
 	"time"
 	"unsafe"
+
+	"github.com/zeebo/xxh3"
 )
 
-const MutationDetectedError mutationDetectionError = "mutation of immutable value detected"
-const InvalidSnapshotStateError mutationDetectionError = "invalid snapshot state"
-const UnsupportedTypeError mutationDetectionError = "unsupported type for immutability check"
+const (
+	MutationDetectedError     mutationDetectionError = "mutation of immutable value detected"
+	InvalidSnapshotStateError mutationDetectionError = "invalid snapshot state"
+	UnsupportedTypeError      mutationDetectionError = "unsupported type for immutability check"
+)
 
 type immutabilityCheckFlag uint8
 
@@ -258,7 +262,8 @@ func newValueSnapshot() *ValueSnapshot {
 
 func initValueSnapshot(
 	dst *ValueSnapshot,
-	options Options, framesToSkip int) *ValueSnapshot {
+	options Options, framesToSkip int,
+) *ValueSnapshot {
 	dst.Reset()
 	if options.Flags&SkipOriginCapturing == 0 {
 		skipCallerFramesAndShowOnlyUsersCode := framesToSkip
@@ -404,7 +409,7 @@ func captureRawBytesLevelChecksum(
 	snapshot *ValueSnapshot,
 	valueBytes []byte, valueKind reflect.Kind,
 ) *ValueSnapshot {
-	hashSum := hashSum(valueBytes)
+	hashSum := uint32(xxh3.Hash(valueBytes))
 	snapshot.checksums[evalKey32(hashSum, valueKind)] = hashSum
 	return snapshot
 }

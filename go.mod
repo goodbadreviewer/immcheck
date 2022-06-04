@@ -1,5 +1,5 @@
 module github.com/goodbadreviewer/immcheck
 
-go 1.16
+go 1.18
 
-require github.com/cespare/xxhash/v2 v2.1.1
+require github.com/zeebo/xxh3 v1.0.2
