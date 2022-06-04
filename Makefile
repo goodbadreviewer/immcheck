@@ -1,3 +1,7 @@
+golangci := go run github.com/golangci/golangci-lint/cmd/golangci-lint@v1.46.2
+benchstat := go run golang.org/x/perf/cmd/benchstat@v0.0.0-20220411212318-84e58bfe0a7e
+
+
 test: clean
 	go test ./...
 	go test -tags immcheck ./...
@@ -6,18 +10,17 @@ test: clean
 coverage: test
 	go tool cover -html=coverage.out
 
-bench:
-	go test -timeout 3h -count=5 -run=xxx -bench=BenchmarkImmcheck ./...
 
-bench_hash:
-	go test -timeout 3h -count=5 -run=xxx -bench=BenchmarkHash ./...
+bench:
+	go test -timeout 3h -count=5 -run=xxx -bench=BenchmarkImmcheck ./... | tee immchek_stat.txt
+	$(benchstat) immchek_stat.txt
 
 profile: clean
 	go test -run=xxx -bench=BenchmarkImmcheckTransactions ./... -cpuprofile profile.out
 	go tool pprof -http=:8080 profile.out
 
-lint: install-golangci-lint
-	golangci-lint run
+lint:
+	$(golangci) run
 
 debug_inline:
 	go build -gcflags='-m -d=ssa/check_bce/debug=1' ./immcheck.go
@@ -27,5 +30,5 @@ clean:
 	@rm -f profile.out
 	@rm -f coverage.out
 
-install-golangci-lint:
-	@which golangci-lint || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(shell go env GOPATH)/bin 1.42.0
+help:
+	@awk '$$1 ~ /^.*:/ {print substr($$1, 0, length($$1)-1)}' Makefile
