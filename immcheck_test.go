@@ -36,7 +36,7 @@ func TestRaceConditionalFunctionsEnabled(t *testing.T) {
 		t.Log(resultingLog)
 		logAsExpected := strings.Contains(
 			resultingLog,
-			"[ERROR] runtime mutation detected. value: `&map[string]string{\"j1\":\"b1\", \"k1\":\"v1\"}`; "+
+			"[ERROR] runtime mutation detected; "+
 				"error: mutation of immutable value detected\nimmutable snapshot was captured here ",
 		)
 		if !logAsExpected {
@@ -204,7 +204,7 @@ func TestCheckImmutabilityWithOptionsOnFinalization(t *testing.T) {
 		t.Log(resultingLog)
 		logAsExpected := strings.Contains(
 			resultingLog,
-			"[ERROR] runtime mutation detected. value: `&map[string]string{\"j1\":\"b1\", \"k1\":\"v1\"}`; "+
+			"[ERROR] runtime mutation detected; "+
 				"error: mutation of immutable value detected\nimmutable snapshot was captured here ",
 		)
 		if !logAsExpected {
@@ -719,6 +719,21 @@ func TestPointerToSubslice(t *testing.T) {
 	checkMutationDetectionMessage(t, panicMessage)
 }
 
+func TestSimpleMap(t *testing.T) {
+	t.Parallel()
+	allowUnsafe := immcheck.Options{Flags: immcheck.AllowInherentlyUnsafeTypes}
+	data := map[string]interface{}{
+		"b": 10,
+	}
+	data["data"] = data
+	immcheck.EnsureImmutabilityWithOptions(&data, allowUnsafe)() // check that no mutation is fine
+	panicMessage := expectMutationPanic(t, func() {
+		defer immcheck.EnsureImmutabilityWithOptions(&data, allowUnsafe)()
+		data["b"] = 3
+	})
+	checkMutationDetectionMessage(t, panicMessage)
+}
+
 func TestMap(t *testing.T) {
 	t.Parallel()
 	allowUnsafe := immcheck.Options{Flags: immcheck.AllowInherentlyUnsafeTypes}
@@ -736,6 +751,7 @@ func TestMap(t *testing.T) {
 		"p": unsafe.Pointer(&person{}),
 		"f": func() {},
 	}
+	data["data"] = data
 	data["d"] = append(data["d"].([]*person), &person{
 		age:    3,
 		height: 4,
