@@ -12,6 +12,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/storozhukBM/pcache"
 	"github.com/zeebo/xxh3"
 )
 
@@ -36,6 +37,9 @@ const (
 	// SkipLoggingOnMutation forces immcheck to not log details of found mutation
 	// in immcheck.EnsureImmutability and immcheck.CheckImmutabilityOnFinalization methods.
 	SkipLoggingOnMutation
+	// doNotDetectRefLoop can be used only internally to skip one cycle of detection and allow reuse of memory values
+	// in map entries capture look at immcheck.perEntrySnapshot.
+	doNotDetectRefLoop
 )
 
 // Options configures immutability check.
@@ -242,8 +246,8 @@ func reportError(v interface{}, checkErr error, options Options) {
 		}
 		_, _ = fmt.Fprintf(
 			logDestination,
-			"[ERROR] runtime mutation detected. value: `%#v`; error: %v\n",
-			v, checkErr,
+			"[ERROR] runtime mutation detected; error: %v\n",
+			checkErr,
 		)
 	}
 	if options.Flags&SkipPanicOnDetectedMutation == 0 {
@@ -252,7 +256,7 @@ func reportError(v interface{}, checkErr error, options Options) {
 }
 
 func newValueSnapshot() *ValueSnapshot {
-	oneBucketCapacity := 8
+	oneBucketCapacity := 16
 	return &ValueSnapshot{
 		captureOriginFile: &bytes.Buffer{},
 		captureOriginLine: 0,
@@ -295,10 +299,13 @@ func captureChecksumMap(snapshot *ValueSnapshot, value reflect.Value, options Op
 			return capturePointer(snapshot, valuePointer, valueKind)
 		}
 		// detect ref loop and skip
-		if _, ok := snapshot.checksums[evalKey(uintptr(valuePointer), valueKind)]; ok {
-			return snapshot
+		if options.Flags&doNotDetectRefLoop == 0 {
+			if _, loopDetected := snapshot.checksums[evalKey(uintptr(valuePointer), valueKind)]; loopDetected {
+				return snapshot
+			}
+			snapshot = capturePointer(snapshot, valuePointer, valueKind)
 		}
-		snapshot = capturePointer(snapshot, valuePointer, valueKind)
+		options.Flags &= ^doNotDetectRefLoop
 		snapshot = captureChecksumMap(snapshot, value.Elem(), options)
 		return snapshot
 	case reflect.Bool, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
@@ -322,6 +329,12 @@ func captureChecksumMap(snapshot *ValueSnapshot, value reflect.Value, options Op
 		if value.IsNil() || value.IsZero() {
 			return capturePointer(snapshot, valuePointer, valueKind)
 		}
+		// detect ref loop and skip
+		if options.Flags&doNotDetectRefLoop == 0 {
+			if _, loopDetected := snapshot.checksums[evalKey(uintptr(valuePointer), valueKind)]; loopDetected {
+				return snapshot
+			}
+		}
 		snapshot.checksums[evalKey(uintptr(valuePointer), valueKind)] = uint32(value.Len())
 		snapshot = perEntrySnapshot(snapshot, value, options)
 		return snapshot
@@ -331,12 +344,10 @@ func captureChecksumMap(snapshot *ValueSnapshot, value reflect.Value, options Op
 	return snapshot
 }
 
-//go:nosplit
 func evalKey32(valuePointer uint32, kind reflect.Kind) uint32 {
 	return valuePointer ^ uint32(kind)
 }
 
-//go:nosplit
 func evalKey(valuePointer uintptr, kind reflect.Kind) uint32 {
 	return uint32(valuePointer) ^ uint32(kind)
 }
@@ -363,13 +374,63 @@ func valueIsPrimitive(v reflect.Value) bool {
 	return false
 }
 
+//nolint:gochecknoglobals // mapIterPool is global to maximise map iterators objects re-use
+var mapIterPool = &sync.Pool{New: func() interface{} { return &reflect.MapIter{} }}
+
+const maxPoolCacheSizePerGoroutine = 1024
+
+//nolint:gochecknoglobals // reflectValuePoolCache is global to maximise pools re-use
+var reflectValuePoolCache = pcache.NewPCache(maxPoolCacheSizePerGoroutine)
+
 func perEntrySnapshot(snapshot *ValueSnapshot, value reflect.Value, options Options) *ValueSnapshot {
-	mapRange := value.MapRange()
-	for mapRange.Next() {
-		k := mapRange.Key()
-		v := mapRange.Value()
-		snapshot = captureChecksumMap(snapshot, k, options)
-		snapshot = captureChecksumMap(snapshot, v, options)
+	iterator := mapIterPool.Get().(*reflect.MapIter)
+	defer func() {
+		iterator.Reset(reflect.Value{})
+		mapIterPool.Put(iterator)
+	}()
+	iterator.Reset(value)
+
+	mapType := value.Type()
+	mapKeyType := mapType.Key()
+	mapValueType := mapType.Elem()
+
+	keyProvider, ok := reflectValuePoolCache.Load(mapKeyType.Name())
+	if !ok {
+		keyProvider = &sync.Pool{
+			New: func() interface{} {
+				poolValue := reflect.New(mapKeyType).Elem()
+				return &poolValue
+			},
+		}
+	}
+	defer reflectValuePoolCache.Store(mapKeyType.Name(), keyProvider)
+	keyPool := keyProvider.(*sync.Pool)
+	k := keyPool.Get().(*reflect.Value)
+	defer keyPool.Put(k)
+
+	valueProvider, ok := reflectValuePoolCache.Load(mapValueType.Name())
+	if !ok {
+		valueProvider = &sync.Pool{
+			New: func() interface{} {
+				poolValue := reflect.New(mapValueType).Elem()
+				return &poolValue
+			},
+		}
+	}
+	defer reflectValuePoolCache.Store(mapValueType.Name(), valueProvider)
+	valuePool := valueProvider.(*sync.Pool)
+	v := valuePool.Get().(*reflect.Value)
+	defer valuePool.Put(v)
+
+	for iterator.Next() {
+		k.SetIterKey(iterator)
+		v.SetIterValue(iterator)
+		snapshot = captureChecksumMap(snapshot, *k, options) // map cannot be a key in map
+		snapshot = captureChecksumMap(
+			snapshot, *v,
+			// map can reference itself in value, so we set doNotDetectRefLoop
+			Options{LogWriter: options.LogWriter, Flags: options.Flags | doNotDetectRefLoop},
+		)
 	}
 	return snapshot
 }
@@ -398,13 +459,11 @@ func perItemSnapshot(snapshot *ValueSnapshot, value reflect.Value, options Optio
 	return snapshot
 }
 
-//go:nosplit
 func capturePointer(snapshot *ValueSnapshot, valuePointer unsafe.Pointer, valueKind reflect.Kind) *ValueSnapshot {
 	snapshot.checksums[evalKey(uintptr(valuePointer), valueKind)] = uint32(uintptr(valuePointer))
 	return snapshot
 }
 
-//go:nosplit
 func captureRawBytesLevelChecksum(
 	snapshot *ValueSnapshot,
 	valueBytes []byte, valueKind reflect.Kind,
@@ -414,7 +473,6 @@ func captureRawBytesLevelChecksum(
 	return snapshot
 }
 
-//go:nosplit
 func convertValueTypeToBytesSlice(value reflect.Value) []byte {
 	var result []byte
 	targetByteSliceHeader := (*reflect.SliceHeader)(unsafe.Pointer(&result))
@@ -428,7 +486,6 @@ func convertValueTypeToBytesSlice(value reflect.Value) []byte {
 	return result
 }
 
-//go:nosplit
 func convertSliceBasedTypeToByteSlice(value reflect.Value) []byte {
 	var result []byte
 	targetByteSliceHeader := (*reflect.SliceHeader)(unsafe.Pointer(&result))
@@ -446,7 +503,6 @@ func convertSliceBasedTypeToByteSlice(value reflect.Value) []byte {
 	return result
 }
 
-//go:nosplit
 func pointerOfValue(value reflect.Value) unsafe.Pointer {
 	//nolint:exhaustive
 	switch value.Kind() {
@@ -464,7 +520,6 @@ func pointerOfValue(value reflect.Value) unsafe.Pointer {
 	panic(fmt.Sprintf("can't get pointer to value. kind: %#v; value: %#v", value.Kind().String(), value))
 }
 
-//go:nosplit
 func fetchDataPointerFromString(value reflect.Value) unsafe.Pointer {
 	stringValue := value.String()
 	return unsafe.Pointer(((*reflect.StringHeader)(unsafe.Pointer(&stringValue))).Data)
@@ -501,7 +556,6 @@ func checksumEquals(newChecksum map[uint32]uint32, originalChecksum map[uint32]u
 //nolint:gochecknoglobals // taskQueue is global to maximise goroutine pool utilization
 var taskQueue = make(chan func())
 
-//go:nosplit
 func runInPool(task func()) {
 	select {
 	case taskQueue <- task:
