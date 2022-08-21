@@ -12,7 +12,6 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/storozhukBM/pcache"
 	"github.com/zeebo/xxh3"
 )
 
@@ -207,7 +206,7 @@ func checkImmutabilityOnFinalization(v interface{}, options Options) {
 			newSnapshot = captureChecksumMap(newSnapshot, reflect.ValueOf(v), options)
 			checkErr := originalSnapshot.CheckImmutabilityAgainst(newSnapshot)
 			if checkErr != nil {
-				reportError(v, checkErr, options)
+				reportError(checkErr, options)
 			}
 		})
 	})
@@ -233,12 +232,12 @@ func ensureImmutability(v interface{}, options Options) func() {
 		newSnapshot = captureChecksumMap(newSnapshot, targetValue, options)
 		checkErr := originalSnapshot.CheckImmutabilityAgainst(newSnapshot)
 		if checkErr != nil {
-			reportError(v, checkErr, options)
+			reportError(checkErr, options)
 		}
 	}
 }
 
-func reportError(v interface{}, checkErr error, options Options) {
+func reportError(checkErr error, options Options) {
 	if options.Flags&SkipLoggingOnMutation == 0 {
 		var logDestination io.Writer = os.Stderr
 		if options.LogWriter != nil {
@@ -380,7 +379,7 @@ var mapIterPool = &sync.Pool{New: func() interface{} { return &reflect.MapIter{}
 const maxPoolCacheSizePerGoroutine = 1024
 
 //nolint:gochecknoglobals // reflectValuePoolCache is global to maximise pools re-use
-var reflectValuePoolCache = pcache.NewPCache(maxPoolCacheSizePerGoroutine)
+var reflectValuePoolCache = NewPCache(maxPoolCacheSizePerGoroutine)
 
 func perEntrySnapshot(snapshot *ValueSnapshot, value reflect.Value, options Options) *ValueSnapshot {
 	iterator := mapIterPool.Get().(*reflect.MapIter)
@@ -392,9 +391,17 @@ func perEntrySnapshot(snapshot *ValueSnapshot, value reflect.Value, options Opti
 
 	mapType := value.Type()
 	mapKeyType := mapType.Key()
+	mapKeyTypeName := typeName{
+		path: mapKeyType.PkgPath(),
+		name: mapKeyType.Name(),
+	}
 	mapValueType := mapType.Elem()
+	mapValueTypeName := typeName{
+		path: mapValueType.PkgPath(),
+		name: mapValueType.Name(),
+	}
 
-	keyProvider, ok := reflectValuePoolCache.Load(mapKeyType.Name())
+	keyProvider, ok := reflectValuePoolCache.Load(mapKeyTypeName)
 	if !ok {
 		keyProvider = &sync.Pool{
 			New: func() interface{} {
@@ -403,12 +410,12 @@ func perEntrySnapshot(snapshot *ValueSnapshot, value reflect.Value, options Opti
 			},
 		}
 	}
-	defer reflectValuePoolCache.Store(mapKeyType.Name(), keyProvider)
+	defer reflectValuePoolCache.Store(mapKeyTypeName, keyProvider)
 	keyPool := keyProvider.(*sync.Pool)
 	k := keyPool.Get().(*reflect.Value)
 	defer keyPool.Put(k)
 
-	valueProvider, ok := reflectValuePoolCache.Load(mapValueType.Name())
+	valueProvider, ok := reflectValuePoolCache.Load(mapValueTypeName)
 	if !ok {
 		valueProvider = &sync.Pool{
 			New: func() interface{} {
@@ -417,7 +424,7 @@ func perEntrySnapshot(snapshot *ValueSnapshot, value reflect.Value, options Opti
 			},
 		}
 	}
-	defer reflectValuePoolCache.Store(mapValueType.Name(), valueProvider)
+	defer reflectValuePoolCache.Store(mapValueTypeName, valueProvider)
 	valuePool := valueProvider.(*sync.Pool)
 	v := valuePool.Get().(*reflect.Value)
 	defer valuePool.Put(v)
