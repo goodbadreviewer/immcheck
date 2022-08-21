@@ -379,7 +379,7 @@ var mapIterPool = &sync.Pool{New: func() interface{} { return &reflect.MapIter{}
 const maxPoolCacheSizePerGoroutine = 1024
 
 //nolint:gochecknoglobals // reflectValuePoolCache is global to maximise pools re-use
-var reflectValuePoolCache = NewPCache(maxPoolCacheSizePerGoroutine)
+var reflectValuePoolCache = newPCache(maxPoolCacheSizePerGoroutine)
 
 func perEntrySnapshot(snapshot *ValueSnapshot, value reflect.Value, options Options) *ValueSnapshot {
 	iterator := mapIterPool.Get().(*reflect.MapIter)
@@ -391,17 +391,9 @@ func perEntrySnapshot(snapshot *ValueSnapshot, value reflect.Value, options Opti
 
 	mapType := value.Type()
 	mapKeyType := mapType.Key()
-	mapKeyTypeName := typeName{
-		path: mapKeyType.PkgPath(),
-		name: mapKeyType.Name(),
-	}
 	mapValueType := mapType.Elem()
-	mapValueTypeName := typeName{
-		path: mapValueType.PkgPath(),
-		name: mapValueType.Name(),
-	}
 
-	keyProvider, ok := reflectValuePoolCache.Load(mapKeyTypeName)
+	keyProvider, ok := reflectValuePoolCache.load(mapKeyType)
 	if !ok {
 		keyProvider = &sync.Pool{
 			New: func() interface{} {
@@ -410,12 +402,12 @@ func perEntrySnapshot(snapshot *ValueSnapshot, value reflect.Value, options Opti
 			},
 		}
 	}
-	defer reflectValuePoolCache.Store(mapKeyTypeName, keyProvider)
+	defer reflectValuePoolCache.store(mapKeyType, keyProvider)
 	keyPool := keyProvider.(*sync.Pool)
 	k := keyPool.Get().(*reflect.Value)
 	defer keyPool.Put(k)
 
-	valueProvider, ok := reflectValuePoolCache.Load(mapValueTypeName)
+	valueProvider, ok := reflectValuePoolCache.load(mapValueType)
 	if !ok {
 		valueProvider = &sync.Pool{
 			New: func() interface{} {
@@ -424,7 +416,7 @@ func perEntrySnapshot(snapshot *ValueSnapshot, value reflect.Value, options Opti
 			},
 		}
 	}
-	defer reflectValuePoolCache.Store(mapValueTypeName, valueProvider)
+	defer reflectValuePoolCache.store(mapValueType, valueProvider)
 	valuePool := valueProvider.(*sync.Pool)
 	v := valuePool.Get().(*reflect.Value)
 	defer valuePool.Put(v)
