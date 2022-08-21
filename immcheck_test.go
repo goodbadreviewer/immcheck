@@ -809,6 +809,12 @@ func expectPanic(t *testing.T, f func(), expectedError error) string {
 		defer func() {
 			actualPanic = recover()
 			if expectedError != nil {
+				if actualPanic == nil {
+					t.Fatalf(
+						"expected error didn't happen. expected %T(%v)",
+						expectedError, expectedError,
+					)
+				}
 				if !errors.Is(actualPanic.(error), expectedError) {
 					t.Fatalf(
 						"unexpected error type. expected %T(%v); actual: %T(%v)",

@@ -1,15 +1,11 @@
 package immcheck
 
 import (
+	"reflect"
 	"sync"
 )
 
-type typeName struct {
-	path string
-	name string
-}
-
-type cache map[typeName]interface{}
+type cache map[reflect.Type]interface{}
 
 type cacheStripe struct {
 	cache cache
@@ -27,20 +23,20 @@ type cacheStripe struct {
 //
 // All operations run in amortized constant time.
 // PCache does its best to cache items inside and do as little synchronization as possible
-// but since it is cache, there is no guarantee that PCache won't evict your item after Store.
+// but since it is cache, there is no guarantee that PCache won't evict your item after store.
 //
 // PCache evicts random items if I goroutine local cache achieves maxSizePerGoroutine size.
 // PCache cleans itself entirely from time to time.
 //
 // The zero PCache is invalid. Use NewPCache method to create PCache.
-type PCache struct {
+type pCache struct {
 	maxSize int
 	pool    *sync.Pool
 }
 
-// NewPCache creates PCache with maxSizePerGoroutine.
-func NewPCache(maxSizePerGoroutine uint) *PCache {
-	return &PCache{
+// newPCache creates PCache with maxSizePerGoroutine.
+func newPCache(maxSizePerGoroutine uint) *pCache {
+	return &pCache{
 		maxSize: int(maxSizePerGoroutine),
 		pool: &sync.Pool{
 			New: func() interface{} {
@@ -52,16 +48,16 @@ func NewPCache(maxSizePerGoroutine uint) *PCache {
 	}
 }
 
-// Load fetches (value, true) from cache associated with key or (nil, false) if it is not present.
-func (p *PCache) Load(key typeName) (interface{}, bool) {
+// load fetches (value, true) from cache associated with key or (nil, false) if it is not present.
+func (p *pCache) load(key reflect.Type) (interface{}, bool) {
 	stripe := p.pool.Get().(*cacheStripe)
 	defer p.pool.Put(stripe)
 	value, ok := stripe.cache[key]
 	return value, ok
 }
 
-// Store stores value for a key in cache.
-func (p *PCache) Store(key typeName, value interface{}) {
+// store stores value for a key in cache.
+func (p *pCache) store(key reflect.Type, value interface{}) {
 	stripe := p.pool.Get().(*cacheStripe)
 	defer p.pool.Put(stripe)
 
